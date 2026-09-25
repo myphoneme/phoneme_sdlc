@@ -6,6 +6,8 @@ through ai_router per the frozen model policy: discovery-chat NLU and the
 custom-name check are non-critical (Ollama); competitive-research
 summarization and the eventual module breakdown are critical (commercial).
 """
+import re
+
 from fastapi import APIRouter, HTTPException
 
 from .. import ai_router, store
@@ -30,6 +32,16 @@ CHAT_STYLE_RULE = (
     "headers, no bullet or numbered lists, no emoji. This renders as a single "
     "chat bubble, not a document."
 )
+
+def _clean_line(line: str) -> str:
+    """Strip bullet markers and markdown emphasis the model adds despite
+    being asked for plain text — verified needed against the real AI server,
+    which wraps company names in **bold** even when told not to."""
+    line = line.strip()
+    line = re.sub(r"^(?:[-•]|\*(?!\*))\s*", "", line)  # leading bullet: -, •, or single *
+    line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)             # **bold**
+    line = re.sub(r"(?<!\w)\*(.+?)\*(?!\w)", r"\1", line)   # *italic*
+    return line.strip()
 
 
 @router.post("/start", response_model=SessionState)
@@ -99,9 +111,9 @@ async def run_research(req: ChatTurnRequest):
         f"Product concept: {basis}\n\n"
         "List 3-5 real or representative companies/products that compete in "
         "this space, one per line, as 'Name — one-line differentiator'.",
-        system="You are the Discovery Chat's competitive-research assistant.",
+        system="You are the Discovery Chat's competitive-research assistant. Plain text only — no markdown bold/italics, no bullet characters.",
     )
-    lines = [l.strip("-• ").strip() for l in result["text"].splitlines() if l.strip()]
+    lines = [_clean_line(l) for l in result["text"].splitlines() if l.strip()]
     state.companies = lines[:5]
     store.save_session(state)
     return state
@@ -122,9 +134,9 @@ async def research_more(req: ResearchMoreRequest):
         "Return additional companies/products matching the request, one per "
         "line, as 'Name — one-line differentiator'. Do not repeat entries "
         "already found.",
-        system="You are the Discovery Chat's competitive-research assistant.",
+        system="You are the Discovery Chat's competitive-research assistant. Plain text only — no markdown bold/italics, no bullet characters.",
     )
-    new_lines = [l.strip("-• ").strip() for l in result["text"].splitlines() if l.strip()]
+    new_lines = [_clean_line(l) for l in result["text"].splitlines() if l.strip()]
     state.companies.extend(new_lines)
     store.save_session(state)
     return state
