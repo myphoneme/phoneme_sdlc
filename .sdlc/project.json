@@ -1,0 +1,12 @@
+{
+  "product_name": "Phoneme SDLC Platform",
+  "product_code": "PSP",
+  "staging_url": "https://phoneme-sdlc.staging.phoneme.internal",
+  "github_remote": "git@github.com:myphoneme/phoneme_sdlc.git",
+  "status": "onboarding",
+  "onboarding_path": "new",
+  "platform_core_version": "0.1.0-pilot",
+  "skills_repo": "phoneme-sdlc-skills",
+  "skills_version": "unset",
+  "created": "2026-09-25T06:55:40Z"
+}
