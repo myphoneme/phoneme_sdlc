@@ -17,6 +17,20 @@ from ..models import (
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
 
+# Discovery chat is force-terminated after this many user turns rather than
+# trusting the model to volunteer a 'CONCEPT SUMMARY:' on its own — verified
+# against the real AI server (2026-09-25) that it will otherwise keep asking
+# open-ended clarifying questions indefinitely (headers, numbered lists,
+# multi-part probes) instead of converging. One user turn from /start plus
+# this many more /chat turns, then the next /chat call is forced to summarize.
+MAX_CLARIFYING_TURNS = 1
+
+CHAT_STYLE_RULE = (
+    "Reply in plain conversational prose only — 2-4 sentences, no markdown "
+    "headers, no bullet or numbered lists, no emoji. This renders as a single "
+    "chat bubble, not a document."
+)
+
 
 @router.post("/start", response_model=SessionState)
 async def start_session(req: StartSessionRequest):
@@ -28,10 +42,10 @@ async def start_session(req: StartSessionRequest):
         req.initial_message,
         system=(
             "You are the Phoneme SDLC Platform's Discovery Chat assistant. "
-            "The user is describing a new product idea. In 2-3 sentences, "
-            "reflect back your understanding of the target users, the core "
-            "workflow, and the problem it solves. Ask one focused follow-up "
-            "question to clarify scope."
+            "The user is describing a new product idea. Reflect back your "
+            "understanding of the target users, the core workflow, and the "
+            "problem it solves, then ask exactly ONE focused follow-up "
+            "question to clarify scope. " + CHAT_STYLE_RULE
         ),
     )
     state.messages.append(ChatMessage(role="assistant", text=result["text"]))
@@ -45,19 +59,25 @@ async def chat_turn(req: ChatTurnRequest):
     if not state:
         raise HTTPException(404, "session not found")
 
+    user_turns_so_far = sum(1 for m in state.messages if m.role == "user")
     state.messages.append(ChatMessage(role="user", text=req.message))
     history = "\n".join(f"{m.role}: {m.text}" for m in state.messages)
 
-    result = await ai_router.generate(
-        ai_router.Feature.DISCOVERY_CHAT_NLU,
-        history,
-        system=(
-            "Continue the Discovery Chat. Once target users, core workflow, "
-            "and must-have features are clear, summarize the concept in one "
-            "paragraph prefixed exactly with 'CONCEPT SUMMARY:' so the "
-            "platform can detect readiness to move to research."
-        ),
-    )
+    if user_turns_so_far >= MAX_CLARIFYING_TURNS:
+        system = (
+            "Enough has been shared to scope this product. Do NOT ask any "
+            "further questions. Respond with ONLY one paragraph, prefixed "
+            "exactly with 'CONCEPT SUMMARY:' (that exact text, once), "
+            "summarizing target users, core workflow, and must-have "
+            "features in 2-3 sentences. " + CHAT_STYLE_RULE
+        )
+    else:
+        system = (
+            "Continue the Discovery Chat. Ask exactly ONE focused follow-up "
+            "question to clarify scope. " + CHAT_STYLE_RULE
+        )
+
+    result = await ai_router.generate(ai_router.Feature.DISCOVERY_CHAT_NLU, history, system=system)
     state.messages.append(ChatMessage(role="assistant", text=result["text"]))
     if "CONCEPT SUMMARY:" in result["text"]:
         state.concept_summary = result["text"].split("CONCEPT SUMMARY:", 1)[1].strip()
