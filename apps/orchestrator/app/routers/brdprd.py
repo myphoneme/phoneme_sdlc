@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 
 from .. import ai_router, store
 from ..models import CommentRequest, AcceptRequest, Requirement
+from .wizard import _strip_markdown
 
 router = APIRouter(prefix="/api/brdprd", tags=["brdprd"])
 
@@ -34,9 +35,10 @@ async def comment_and_regenerate(session_id: str, req: CommentRequest):
         f"Reviewer comment: {req.comment}\n\n"
         "Rewrite the requirement body to address the comment. Return only "
         "the revised body text.",
-        system="You are the BRD/PRD Manager's regenerate-from-comments step.",
+        system="You are the BRD/PRD Manager's regenerate-from-comments step. "
+        "Plain text only -- no markdown bold/italics, no headers.",
     )
-    r.revised_body = result["text"].strip()
+    r.revised_body = _strip_markdown(result["text"].strip())
     r.status = "Revised — needs re-review"
     store.add_requirement(session_id, r)
     return r

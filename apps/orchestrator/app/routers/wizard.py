@@ -2,12 +2,26 @@
 Stage 2 tail (Freeze Summary / Module Breakdown) and Stage 3 (Generating
 BRD/PRD) endpoints.
 """
+import re
+
 from fastapi import APIRouter, HTTPException
 
 from .. import ai_router, store
 from ..models import FreezeRequest, GenerateRequest, Requirement, SessionState
 
 router = APIRouter(prefix="/api/wizard", tags=["wizard"])
+
+
+def _strip_markdown(text: str) -> str:
+    """Strip markdown bold/italic emphasis the model adds despite plain-text
+    instructions -- same artifact class found in discovery-chat/research
+    (see routers/discovery.py::_clean_line). Verified needed here too: the
+    real model wraps requirement titles/bodies in **bold** (e.g. actor
+    names, "**Title:**" prefixes) even when the system prompt doesn't yet
+    forbid it."""
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"(?<!\w)\*(.+?)\*(?!\w)", r"\1", text)
+    return text.strip()
 
 
 @router.post("/freeze", response_model=SessionState)
@@ -28,7 +42,7 @@ async def freeze_scope(req: FreezeRequest):
         "not built per project).",
         system="You are the module-breakdown step of the Idea-to-BRD/PRD Wizard.",
     )
-    modules = [l.strip("-• ").strip() for l in result["text"].splitlines() if l.strip()]
+    modules = [_strip_markdown(l.strip("-• ").strip()) for l in result["text"].splitlines() if l.strip()]
     state.modules = modules
     state.stage = "generating"
     store.save_session(state)
@@ -53,7 +67,8 @@ async def generate_brd_prd(req: GenerateRequest):
             "Draft the BRD/PRD requirement for this module: a short title "
             "line, then 3-5 sentences covering description, actors, and "
             "acceptance criteria.",
-            system="You are the BRD/PRD generation step of the Idea-to-BRD/PRD Wizard.",
+            system="You are the BRD/PRD generation step of the Idea-to-BRD/PRD Wizard. "
+            "Plain text only -- no markdown bold/italics, no headers.",
         )
         text = result["text"].strip()
         title, _, rest = text.partition("\n")
@@ -61,8 +76,8 @@ async def generate_brd_prd(req: GenerateRequest):
         r = Requirement(
             req_id=req_id,
             module=module,
-            title=title.strip() or module,
-            body=rest.strip() or text,
+            title=_strip_markdown(title.strip()) or module,
+            body=_strip_markdown(rest.strip()) or _strip_markdown(text),
             status="Draft",
         )
         store.add_requirement(state.session_id, r)
