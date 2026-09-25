@@ -44,7 +44,14 @@ export default function DiscoveryChat({ session, setSession }) {
             {m.text}
           </div>
         ))}
-        {loading && <div className="chat-bubble bot-bubble typing">Thinking…</div>}
+        {loading && (
+          <div className="chat-bubble bot-bubble typing">
+            <span className="typing-label">Thinking</span>
+            <span className="typing-dot" />
+            <span className="typing-dot" />
+            <span className="typing-dot" />
+          </div>
+        )}
       </div>
 
       {error && <div className="error-banner">{error}</div>}
