@@ -8,6 +8,17 @@ Security service's secrets store, never committed here).
 """
 import os
 
+from dotenv import load_dotenv
+
+# Load a .env file next to this module's project root (apps/orchestrator/.env)
+# if present, before reading any environment variables below. Real deploys
+# (staging/prod) should still prefer real environment/secrets-store injection
+# over the file, but this makes local/dev and a staging .env "just work"
+# without requiring `set -a; source .env` before every start. Values already
+# present in the environment take precedence (override=False, the default),
+# so a real secrets-store injection always wins over a stray .env file.
+load_dotenv()
+
 # --- AI routing (BRD/PRD Section 18.8 / TDD Section 8 — reviewed decision) ---
 OLLAMA_URL = os.environ.get("AI_GATEWAY_URL", "http://10.100.60.121:8000/v1/chat/completions")
 OLLAMA_MODEL = os.environ.get("AI_GATEWAY_MODEL", "gemma4:e4b")
