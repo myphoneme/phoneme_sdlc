@@ -163,6 +163,21 @@ export default function ResearchCard({ session, setSession }) {
               </ul>
             </section>
           )}
+
+          {research.sources?.length > 0 && (
+            <section className="research-section">
+              <h3>Sources</h3>
+              <ul className="research-sources-list">
+                {research.sources.map((url, i) => (
+                  <li key={i}>
+                    <a href={url} target="_blank" rel="noopener noreferrer">
+                      {url}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
       )}
 

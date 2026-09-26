@@ -78,7 +78,8 @@ before or after it) matching exactly this shape:
   "monetization": ["<bullet: a concrete pricing tier or revenue lever, e.g. 'Free: X — Pro ($Y/mo): Z'>"],
   "positioning_reframe": "<the naive/generic way someone would describe this idea, then the sharper, more valuable and more defensible way to position it instead -- one crisp paragraph contrasting the two>",
   "killer_feature": "<the single standout feature or UX moment that should be the product's central hook -- name it, then 2-3 sentences on why it's the differentiator and roughly how it would work>",
-  "suggested_names": ["<3 short, brandable product name candidates specific to this concept>"]
+  "suggested_names": ["<3 short, brandable product name candidates specific to this concept>"],
+  "sources": ["<a real URL you actually consulted via web search for this research -- only include URLs you genuinely retrieved, never fabricate one>"]
 }
 
 Requirements:
@@ -94,6 +95,10 @@ Requirements:
   reframe.
 - suggested_names must be plausible brand names for THIS concept -- never
   reuse a competitor's name.
+- sources should list the real URLs your web search actually returned (aim
+  for 4-8 across the whole response). Only include a URL if it came from an
+  actual search result -- never invent or guess one. If no web search was
+  used for this response, return an empty list rather than fabricating URLs.
 - Output valid JSON only. Do not wrap it in ```json fences.
 """
 
@@ -132,6 +137,7 @@ def _parse_research_report(raw_text: str) -> tuple[ResearchReport, list[str]]:
         monetization=[_clean_line(str(x)) for x in data.get("monetization", [])],
         positioning_reframe=_clean_line(str(data.get("positioning_reframe", ""))),
         killer_feature=_clean_line(str(data.get("killer_feature", ""))),
+        sources=[_clean_line(str(x)) for x in data.get("sources", []) if isinstance(x, str) and x.strip()],
     ), [_clean_line(str(x)) for x in data.get("suggested_names", [])]
 
 
@@ -255,7 +261,8 @@ async def research_more(req: ResearchMoreRequest):
         "products/categories matching this follow-up request. Respond with "
         "ONLY a JSON object: "
         '{"market_landscape": [{"category": "...", "examples": "...", '
-        '"what_they_do": "...", "limitations": "..."}]}. '
+        '"what_they_do": "...", "limitations": "..."}], '
+        '"sources": ["<real URL actually consulted via web search, if any>"]}. '
         "Do not repeat categories already found. No markdown fences.",
         system="You are the Discovery Chat's competitive-research assistant. Output strict JSON only.",
     )
@@ -270,6 +277,7 @@ async def research_more(req: ResearchMoreRequest):
             )
             for r in data.get("market_landscape", []) if isinstance(r, dict)
         ]
+        new_sources = [_clean_line(str(x)) for x in data.get("sources", []) if isinstance(x, str) and x.strip()]
     except (ValueError, json.JSONDecodeError) as exc:
         logger.warning(
             "research/more JSON parse failed for session %s (%s) -- no rows "
@@ -277,8 +285,12 @@ async def research_more(req: ResearchMoreRequest):
             state.session_id, exc,
         )
         new_rows = []
+        new_sources = []
 
     existing.market_landscape.extend(new_rows)
+    for s in new_sources:
+        if s not in existing.sources:
+            existing.sources.append(s)
     state.research = existing
     state.companies = [f"{row.category}: {row.examples}" for row in existing.market_landscape]
     store.save_session(state)
