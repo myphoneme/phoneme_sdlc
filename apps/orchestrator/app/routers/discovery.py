@@ -76,6 +76,8 @@ before or after it) matching exactly this shape:
   "risks": ["<bullet: a real technical, legal, or platform constraint that would shape the build>"],
   "recommended_features": ["<bullet: a specific feature to incorporate, phrased as a capability, ideally grouped by build phase e.g. 'Phase 1 (Ingestion): ...'>"],
   "monetization": ["<bullet: a concrete pricing tier or revenue lever, e.g. 'Free: X — Pro ($Y/mo): Z'>"],
+  "positioning_reframe": "<the naive/generic way someone would describe this idea, then the sharper, more valuable and more defensible way to position it instead -- one crisp paragraph contrasting the two>",
+  "killer_feature": "<the single standout feature or UX moment that should be the product's central hook -- name it, then 2-3 sentences on why it's the differentiator and roughly how it would work>",
   "suggested_names": ["<3 short, brandable product name candidates specific to this concept>"]
 }
 
@@ -86,6 +88,10 @@ Requirements:
 - Every list should be specific to THIS product concept, not generic SaaS
   advice that would apply to any idea.
 - recommended_features should total 6-12 items across phases.
+- positioning_reframe and killer_feature must be genuinely sharp, specific
+  insight, not a restatement of the concept -- if the obvious framing is
+  already the best framing, say so briefly rather than manufacturing a fake
+  reframe.
 - suggested_names must be plausible brand names for THIS concept -- never
   reuse a competitor's name.
 - Output valid JSON only. Do not wrap it in ```json fences.
@@ -124,6 +130,8 @@ def _parse_research_report(raw_text: str) -> tuple[ResearchReport, list[str]]:
         risks=[_clean_line(str(x)) for x in data.get("risks", [])],
         recommended_features=[_clean_line(str(x)) for x in data.get("recommended_features", [])],
         monetization=[_clean_line(str(x)) for x in data.get("monetization", [])],
+        positioning_reframe=_clean_line(str(data.get("positioning_reframe", ""))),
+        killer_feature=_clean_line(str(data.get("killer_feature", ""))),
     ), [_clean_line(str(x)) for x in data.get("suggested_names", [])]
 
 

@@ -146,6 +146,46 @@ async def _call_gemini(prompt: str, system: str | None = None, use_search: bool 
             raise AIRouterError(f"Unexpected Gemini response shape: {data!r}") from exc
 
 
+async def _call_openai(prompt: str, system: str | None = None, use_search: bool = False) -> str:
+    if not config.OPENAI_API_KEY:
+        raise AIRouterError("OPENAI_API_KEY not configured")
+    headers = {
+        "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+        "content-type": "application/json",
+    }
+    # Responses API (not Chat Completions) -- required for the hosted
+    # web_search tool. $10/1,000 calls, same pricing shape as Claude's
+    # web_search tool and priced identically per OpenAI's published rates
+    # (added 2026-09-26 as a third search-grounded backend option).
+    payload = {"model": config.OPENAI_MODEL, "input": prompt}
+    if system:
+        payload["instructions"] = system
+    if use_search:
+        payload["tools"] = [{"type": "web_search"}]
+    async with httpx.AsyncClient(timeout=90 if use_search else 60) as client:
+        resp = await client.post("https://api.openai.com/v1/responses", headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        try:
+            # The Responses API returns a list of output items -- web_search
+            # calls, reasoning items, and one or more "message" items whose
+            # own content list holds the actual "output_text" blocks. Join
+            # every output_text block across every message item, mirroring
+            # how the Anthropic/Gemini extraction skips non-text blocks.
+            texts = [
+                block.get("text", "")
+                for item in data.get("output", [])
+                if item.get("type") == "message"
+                for block in item.get("content", [])
+                if block.get("type") == "output_text"
+            ]
+            if not texts:
+                raise KeyError("no output_text blocks in response")
+            return "".join(texts)
+        except (KeyError, IndexError, TypeError) as exc:
+            raise AIRouterError(f"Unexpected OpenAI response shape: {data!r}") from exc
+
+
 async def _call_astra(prompt: str, system: str | None = None, use_search: bool = False) -> str:
     # Placeholder — provider unconfirmed (TDD Section 9 open item). Wired so
     # that once ASTRA_API_URL/ASTRA_API_KEY are set, this becomes a real call
@@ -158,6 +198,7 @@ async def _call_astra(prompt: str, system: str | None = None, use_search: bool =
 _COMMERCIAL_BACKENDS = {
     "anthropic": _call_anthropic,
     "gemini": _call_gemini,
+    "openai": _call_openai,
     "astra": _call_astra,
 }
 
@@ -172,7 +213,7 @@ async def generate(feature: Feature, prompt: str, system: str | None = None) -> 
     """
     if feature in CRITICAL_FEATURES:
         backend = _COMMERCIAL_BACKENDS.get(config.COMMERCIAL_PROVIDER, _call_anthropic)
-        use_search = feature in SEARCH_GROUNDED_FEATURES and config.COMMERCIAL_PROVIDER in ("anthropic", "gemini")
+        use_search = feature in SEARCH_GROUNDED_FEATURES and config.COMMERCIAL_PROVIDER in ("anthropic", "gemini", "openai")
         try:
             text = await backend(prompt, system, use_search=use_search)
             return {

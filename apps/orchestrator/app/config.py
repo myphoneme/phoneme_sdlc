@@ -27,11 +27,16 @@ OLLAMA_TIMEOUT_SECONDS = int(os.environ.get("AI_GATEWAY_TIMEOUT", "60"))
 # Commercial tier — provider selected per COMMERCIAL_PROVIDER. Each provider's
 # API key comes from the Security service's secrets store on staging; here it
 # is read from the environment only as a local/dev convenience.
-COMMERCIAL_PROVIDER = os.environ.get("COMMERCIAL_PROVIDER", "anthropic")  # anthropic | gemini | astra
+COMMERCIAL_PROVIDER = os.environ.get("COMMERCIAL_PROVIDER", "anthropic")  # anthropic | gemini | openai | astra
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+# OpenAI -- added 2026-09-26 as a third search-grounded commercial backend
+# (BRD/PRD Section 18.8 amendment) so research/module-breakdown can be run
+# against GPT's web_search tool as well, not just Anthropic/Gemini.
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.1")
 # "Astra" — provider unconfirmed (BRD/PRD Section 18.8 footnote / TDD Section 9
 # open item). Wired as a placeholder slot so the router doesn't need changes
 # once the provider is confirmed.

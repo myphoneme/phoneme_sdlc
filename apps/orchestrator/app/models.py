@@ -23,13 +23,22 @@ class ResearchReport(BaseModel):
     """Structured, web-search-grounded competitive research — mirrors the
     depth of a real analyst pass (market landscape table, viability verdict,
     demand signals, legal/technical risk, phased feature recommendations,
-    monetization model) rather than a bare list of company names."""
+    monetization model) rather than a bare list of company names.
+
+    positioning_reframe / killer_feature (added 2026-09-26): the sharper,
+    non-generic framing of the idea and its single standout differentiator
+    -- the move that made the ChatGPT response in the user's comparison PDF
+    the most build-ready of the three (it redefined the product's core
+    object and named "Forward to Brain" as the central UX, rather than just
+    listing competitors)."""
     market_landscape: list["MarketLandscapeRow"] = []
     viability_verdict: str = ""
     market_demand: list[str] = []
     risks: list[str] = []
     recommended_features: list[str] = []
     monetization: list[str] = []
+    positioning_reframe: str = ""
+    killer_feature: str = ""
     sources: list[str] = []
 
 

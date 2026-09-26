@@ -45,6 +45,18 @@ async def freeze_scope(req: FreezeRequest):
                 "\n\nAlso known constraints/risks to keep modules realistic "
                 "about:\n- " + "\n- ".join(state.research.risks)
             )
+        if state.research.killer_feature:
+            research_context += (
+                "\n\nThe research identified this as the product's central "
+                "differentiator -- make sure it has an obvious home in the "
+                "module breakdown, not buried as an afterthought inside a "
+                "generic module: " + state.research.killer_feature
+            )
+        if state.research.positioning_reframe:
+            research_context += (
+                "\n\nPositioning to keep in mind while naming/scoping "
+                "modules: " + state.research.positioning_reframe
+            )
 
     result = await ai_router.generate(
         ai_router.Feature.MODULE_BREAKDOWN,

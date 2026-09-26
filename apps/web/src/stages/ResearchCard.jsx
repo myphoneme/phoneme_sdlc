@@ -106,6 +106,20 @@ export default function ResearchCard({ session, setSession }) {
             </section>
           )}
 
+          {research.positioning_reframe && (
+            <section className="research-section">
+              <h3>Positioning</h3>
+              <p className="research-verdict research-reframe">{research.positioning_reframe}</p>
+            </section>
+          )}
+
+          {research.killer_feature && (
+            <section className="research-section">
+              <h3>Killer feature</h3>
+              <p className="research-verdict research-killer-feature">{research.killer_feature}</p>
+            </section>
+          )}
+
           {research.market_demand?.length > 0 && (
             <section className="research-section">
               <h3>Market demand signals</h3>
