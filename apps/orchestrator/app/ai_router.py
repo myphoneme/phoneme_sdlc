@@ -135,15 +135,30 @@ async def generate(feature: Feature, prompt: str, system: str | None = None) -> 
         try:
             text = await backend(prompt, system)
             return {"text": text, "tier": "commercial", "model": config.COMMERCIAL_PROVIDER, "fallback": False}
-        except AIRouterError as exc:
+        except (AIRouterError, httpx.HTTPError) as exc:
+            # httpx.HTTPError covers HTTPStatusError (non-2xx from the
+            # provider, e.g. rate limit/auth/server errors) and network-level
+            # failures (timeout, connect error) raised by resp.raise_for_status()
+            # and the request itself inside _call_anthropic/_call_gemini --
+            # neither of which is an AIRouterError. Without catching these too,
+            # a transient commercial-tier failure bypasses the fallback below
+            # entirely and surfaces to the caller as a raw unhandled 500.
             logger.warning(
-                "Commercial tier unavailable for critical feature %s (%s) — "
+                "Commercial tier unavailable for critical feature %s (%s: %s) — "
                 "falling back to Ollama for local/dev only. This must not "
                 "happen on staging without an explicit tier downgrade.",
-                feature.value, exc,
+                feature.value, type(exc).__name__, exc,
             )
-            text = await _call_ollama(prompt, system)
-            return {"text": text, "tier": "ollama", "model": config.OLLAMA_MODEL, "fallback": True}
+            try:
+                text = await _call_ollama(prompt, system)
+                return {"text": text, "tier": "ollama", "model": config.OLLAMA_MODEL, "fallback": True}
+            except Exception:
+                logger.exception(
+                    "Ollama fallback also failed for critical feature %s after "
+                    "commercial tier error (%s: %s)",
+                    feature.value, type(exc).__name__, exc,
+                )
+                raise
     else:
         text = await _call_ollama(prompt, system)
         return {"text": text, "tier": "ollama", "model": config.OLLAMA_MODEL, "fallback": False}

@@ -57,12 +57,19 @@ export default function DiscoveryChat({ session, setSession }) {
       {error && <div className="error-banner">{error}</div>}
 
       <div className="chat-input-row">
-        <input
+        <textarea
+          className="chat-textarea"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="Describe your product idea…"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
+          placeholder="Describe your product idea… (Shift+Enter for a new line)"
           disabled={loading}
+          rows={3}
         />
         <button className="btn-primary" onClick={send} disabled={loading || !input.trim()}>
           Send

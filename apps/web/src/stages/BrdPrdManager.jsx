@@ -84,11 +84,19 @@ function RequirementCard({ sessionId, req, onChange }) {
       {!req.revised_body && req.status !== "Frozen" && (
         <>
           <div className="comment-row">
-            <input
+            <textarea
+              className="chat-textarea"
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder="Leave a review comment to request a revision…"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!busy && comment.trim()) submitComment();
+                }
+              }}
+              placeholder="Leave a review comment to request a revision… (Shift+Enter for a new line)"
               disabled={busy}
+              rows={3}
             />
             <button className="btn-secondary" disabled={busy || !comment.trim()} onClick={submitComment}>
               Regenerate from comment
