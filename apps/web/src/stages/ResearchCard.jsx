@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
 
-const SUGGESTED_NAMES = ["HireLoop", "RecruitIQ", "TalentSprint"];
-
 export default function ResearchCard({ session, setSession }) {
   const [loading, setLoading] = useState(false);
   const [moreQuery, setMoreQuery] = useState("");
@@ -10,8 +8,15 @@ export default function ResearchCard({ session, setSession }) {
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState(null);
 
+  const research = session?.research;
+  const hasReport = research && (
+    research.market_landscape?.length ||
+    research.viability_verdict ||
+    research.recommended_features?.length
+  );
+
   useEffect(() => {
-    if (session && session.companies.length === 0) {
+    if (session && !session.research && session.companies.length === 0) {
       setLoading(true);
       api
         .research(session.session_id)
@@ -52,20 +57,111 @@ export default function ResearchCard({ session, setSession }) {
 
   if (!session) return null;
 
+  const suggestedNames = session.suggested_names?.length ? session.suggested_names : [];
+
   return (
     <div className="stage-card">
       <h2>Competitive Research</h2>
-      <p className="stage-hint">Based on your concept, here's who else plays in this space.</p>
+      <p className="stage-hint">
+        Web-search-grounded market research: who else plays in this space, whether it's viable
+        for revenue, what to build, and how to price it.
+      </p>
 
-      <div className="research-card">
-        {loading && session.companies.length === 0 && <div className="stage-hint">Searching…</div>}
-        {session.companies.map((c, i) => (
-          <div key={i} className="research-row">
-            <span className="chip accent">Found</span>
-            <span>{c}</span>
-          </div>
-        ))}
-      </div>
+      {loading && !hasReport && <div className="stage-hint">Researching the live web…</div>}
+
+      {hasReport && (
+        <div className="research-report">
+          {research.market_landscape?.length > 0 && (
+            <section className="research-section">
+              <h3>Market landscape</h3>
+              <div className="research-table-wrap">
+                <table className="research-table">
+                  <thead>
+                    <tr>
+                      <th>Category</th>
+                      <th>Examples</th>
+                      <th>What they do</th>
+                      <th>Limitations</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {research.market_landscape.map((row, i) => (
+                      <tr key={i}>
+                        <td className="research-cell-strong">{row.category}</td>
+                        <td>{row.examples}</td>
+                        <td>{row.what_they_do}</td>
+                        <td>{row.limitations}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {research.viability_verdict && (
+            <section className="research-section">
+              <h3>Viability &amp; revenue verdict</h3>
+              <p className="research-verdict">{research.viability_verdict}</p>
+            </section>
+          )}
+
+          {research.market_demand?.length > 0 && (
+            <section className="research-section">
+              <h3>Market demand signals</h3>
+              <ul className="research-bullet-list">
+                {research.market_demand.map((b, i) => (
+                  <li key={i}>{b}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {research.risks?.length > 0 && (
+            <section className="research-section">
+              <h3>Risks &amp; constraints</h3>
+              <ul className="research-bullet-list research-risk-list">
+                {research.risks.map((b, i) => (
+                  <li key={i}>{b}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {research.recommended_features?.length > 0 && (
+            <section className="research-section">
+              <h3>Recommended features</h3>
+              <ul className="research-bullet-list">
+                {research.recommended_features.map((b, i) => (
+                  <li key={i}>{b}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {research.monetization?.length > 0 && (
+            <section className="research-section">
+              <h3>Monetization model</h3>
+              <ul className="research-bullet-list">
+                {research.monetization.map((b, i) => (
+                  <li key={i}>{b}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+      )}
+
+      {!hasReport && !loading && session.companies.length > 0 && (
+        <div className="research-card">
+          {session.companies.map((c, i) => (
+            <div key={i} className="research-row">
+              <span className="chip accent">Found</span>
+              <span>{c}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="research-more-row">
         <input
@@ -85,13 +181,19 @@ export default function ResearchCard({ session, setSession }) {
       <hr className="divider" />
 
       <h3>Pick a product name</h3>
-      <div className="choice-row">
-        {SUGGESTED_NAMES.map((n) => (
-          <button key={n} className="opt-chip" disabled={checking} onClick={() => checkAndSelect(n)}>
-            {n}
-          </button>
-        ))}
-      </div>
+      {suggestedNames.length > 0 ? (
+        <div className="choice-row">
+          {suggestedNames.map((n) => (
+            <button key={n} className="opt-chip" disabled={checking} onClick={() => checkAndSelect(n)}>
+              {n}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="stage-hint">
+          {loading ? "Generating name ideas from your concept…" : "Type a name below to check and use it."}
+        </p>
+      )}
 
       <div className="custom-name-row">
         <input

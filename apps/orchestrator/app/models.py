@@ -12,11 +12,34 @@ class ChatMessage(BaseModel):
     text: str
 
 
+class MarketLandscapeRow(BaseModel):
+    category: str
+    examples: str
+    what_they_do: str
+    limitations: str
+
+
+class ResearchReport(BaseModel):
+    """Structured, web-search-grounded competitive research — mirrors the
+    depth of a real analyst pass (market landscape table, viability verdict,
+    demand signals, legal/technical risk, phased feature recommendations,
+    monetization model) rather than a bare list of company names."""
+    market_landscape: list["MarketLandscapeRow"] = []
+    viability_verdict: str = ""
+    market_demand: list[str] = []
+    risks: list[str] = []
+    recommended_features: list[str] = []
+    monetization: list[str] = []
+    sources: list[str] = []
+
+
 class SessionState(BaseModel):
     session_id: str
     messages: list[ChatMessage] = []
     concept_summary: Optional[str] = None
-    companies: list[str] = []
+    companies: list[str] = []  # legacy flat list — kept as a fallback render path
+    research: Optional[ResearchReport] = None
+    suggested_names: list[str] = []
     selected_name: Optional[str] = None
     selected_theme: Optional[str] = None
     modules: list[str] = []

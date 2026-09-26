@@ -31,9 +31,25 @@ async def freeze_scope(req: FreezeRequest):
     if not state:
         raise HTTPException(404, "session not found")
 
+    research_context = ""
+    if state.research and state.research.recommended_features:
+        research_context = (
+            "\n\nCompetitive research already surfaced these recommended "
+            "features -- ground the module breakdown in them rather than "
+            "inventing scope from scratch, mapping each feature to whichever "
+            "module it belongs under:\n- "
+            + "\n- ".join(state.research.recommended_features)
+        )
+        if state.research.risks:
+            research_context += (
+                "\n\nAlso known constraints/risks to keep modules realistic "
+                "about:\n- " + "\n- ".join(state.research.risks)
+            )
+
     result = await ai_router.generate(
         ai_router.Feature.MODULE_BREAKDOWN,
-        f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n\n"
+        f"Product: {state.selected_name}\nConcept: {state.concept_summary}"
+        f"{research_context}\n\n"
         "Break this product down into 4-8 functional modules for a BRD/PRD. "
         "One module name per line, no numbering, no descriptions. Recognize "
         "authentication/security/API-gateway concerns and label them "

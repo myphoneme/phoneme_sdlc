@@ -42,12 +42,27 @@ CRITICAL_FEATURES = {
     Feature.COMPETITIVE_RESEARCH,
 }
 
+# Features that should be answered with live web-search grounding rather
+# than the model's training-data recall alone -- these are the two steps
+# where "what actually exists on the market right now" materially changes
+# the output (BRD/PRD Section 18.8 amendment, 2026-09-26: grounding added
+# after staging validation showed un-grounded research degrading to generic
+# SaaS names unrelated to the product concept).
+SEARCH_GROUNDED_FEATURES = {
+    Feature.COMPETITIVE_RESEARCH,
+    Feature.MODULE_BREAKDOWN,
+}
+
 
 class AIRouterError(Exception):
     pass
 
 
-async def _call_ollama(prompt: str, system: str | None = None) -> str:
+async def _call_ollama(prompt: str, system: str | None = None, use_search: bool = False) -> str:
+    # use_search is accepted-and-ignored: Ollama here has no web-search tool
+    # wired up. Kept in the signature so _call_ollama can be swapped in
+    # wherever a _COMMERCIAL_BACKENDS-shaped callable is expected without a
+    # TypeError on the use_search kwarg.
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -63,7 +78,7 @@ async def _call_ollama(prompt: str, system: str | None = None) -> str:
             raise AIRouterError(f"Unexpected Ollama response shape: {data!r}") from exc
 
 
-async def _call_anthropic(prompt: str, system: str | None = None) -> str:
+async def _call_anthropic(prompt: str, system: str | None = None, use_search: bool = False) -> str:
     if not config.ANTHROPIC_API_KEY:
         raise AIRouterError("ANTHROPIC_API_KEY not configured")
     headers = {
@@ -73,22 +88,36 @@ async def _call_anthropic(prompt: str, system: str | None = None) -> str:
     }
     payload = {
         "model": config.ANTHROPIC_MODEL,
-        "max_tokens": 2048,
+        # Search-grounded calls return a lot more structured content
+        # (market tables, phased feature lists, citations) than a plain
+        # generation -- give them more room than the 2048-token default.
+        "max_tokens": 4096 if use_search else 2048,
         "messages": [{"role": "user", "content": prompt}],
     }
     if system:
         payload["system"] = system
-    async with httpx.AsyncClient(timeout=60) as client:
+    if use_search:
+        # Native Claude web-search tool -- $10 per 1,000 searches + token
+        # cost, no special API tier required. Claude decides when to issue
+        # a search; results (with source URLs) are folded into its own
+        # context before it writes the final answer.
+        payload["tools"] = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
+    async with httpx.AsyncClient(timeout=90 if use_search else 60) as client:
         resp = await client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
         resp.raise_for_status()
         data = resp.json()
         try:
+            # A search-grounded response's `content` list interleaves text
+            # blocks with server_tool_use/web_search_tool_result blocks for
+            # each search Claude ran -- concatenating only the `text` blocks
+            # (as before) already gives the final synthesized answer and
+            # skips the intermediate tool-call bookkeeping.
             return "".join(block["text"] for block in data["content"] if block.get("type") == "text")
         except (KeyError, TypeError) as exc:
             raise AIRouterError(f"Unexpected Anthropic response shape: {data!r}") from exc
 
 
-async def _call_gemini(prompt: str, system: str | None = None) -> str:
+async def _call_gemini(prompt: str, system: str | None = None, use_search: bool = False) -> str:
     if not config.GEMINI_API_KEY:
         raise AIRouterError("GEMINI_API_KEY not configured")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
@@ -96,17 +125,28 @@ async def _call_gemini(prompt: str, system: str | None = None) -> str:
     payload = {"contents": contents}
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
-    async with httpx.AsyncClient(timeout=60) as client:
+    if use_search:
+        # Grounding with Google Search -- 5,000 free requests/month on
+        # Gemini 3.x then ~$14/1,000 queries; no special tier needed beyond
+        # a configured GEMINI_API_KEY. Keeps research grounded regardless of
+        # which commercial provider staging is pointed at (this must not be
+        # an Anthropic-only capability).
+        payload["tools"] = [{"google_search": {}}]
+    async with httpx.AsyncClient(timeout=90 if use_search else 60) as client:
         resp = await client.post(url, json=payload)
         resp.raise_for_status()
         data = resp.json()
         try:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
+            # Grounded responses can come back as multiple parts (the model
+            # may interleave search-driven segments); join every text part
+            # rather than assuming a single parts[0].
+            parts = data["candidates"][0]["content"]["parts"]
+            return "".join(p["text"] for p in parts if "text" in p)
         except (KeyError, IndexError, TypeError) as exc:
             raise AIRouterError(f"Unexpected Gemini response shape: {data!r}") from exc
 
 
-async def _call_astra(prompt: str, system: str | None = None) -> str:
+async def _call_astra(prompt: str, system: str | None = None, use_search: bool = False) -> str:
     # Placeholder — provider unconfirmed (TDD Section 9 open item). Wired so
     # that once ASTRA_API_URL/ASTRA_API_KEY are set, this becomes a real call
     # without touching any caller.
@@ -132,9 +172,13 @@ async def generate(feature: Feature, prompt: str, system: str | None = None) -> 
     """
     if feature in CRITICAL_FEATURES:
         backend = _COMMERCIAL_BACKENDS.get(config.COMMERCIAL_PROVIDER, _call_anthropic)
+        use_search = feature in SEARCH_GROUNDED_FEATURES and config.COMMERCIAL_PROVIDER in ("anthropic", "gemini")
         try:
-            text = await backend(prompt, system)
-            return {"text": text, "tier": "commercial", "model": config.COMMERCIAL_PROVIDER, "fallback": False}
+            text = await backend(prompt, system, use_search=use_search)
+            return {
+                "text": text, "tier": "commercial", "model": config.COMMERCIAL_PROVIDER,
+                "fallback": False, "grounded": use_search,
+            }
         except (AIRouterError, httpx.HTTPError) as exc:
             # httpx.HTTPError covers HTTPStatusError (non-2xx from the
             # provider, e.g. rate limit/auth/server errors) and network-level
