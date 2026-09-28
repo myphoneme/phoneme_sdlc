@@ -3,6 +3,19 @@
 -- Everything here is scoped down from the full blueprint entity list (docs/SDLC Mgmt - Blueprint.pdf,
 -- section 17) to just what the BRD/PRD + Technical Design Pack stage needs. Phase 2 adds
 -- services/api/db_entities/screens/test_cases/defects/releases/deployments as their own tables.
+--
+-- 2026-09-28: deployed to the dedicated DB server rather than a per-project
+-- default. pgvector enabled from day one (not wired into any module yet) so
+-- future RAG use cases -- semantic search over past requirements/research/
+-- artifacts to ground new module drafting -- don't need a schema migration
+-- later, just new columns/tables using the `vector` type already available.
+
+-- The pgvector *package* installs a Postgres extension named "vector"
+-- (not "pgvector") -- this is the extension that provides the `vector`
+-- column type and similarity operators (<->, <#>, <=>) used below.
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS pgcrypto; -- gen_random_uuid()
 
 CREATE TYPE requirement_status AS ENUM (
   'draft', 'review', 'needs_clarification', 'approved', 'frozen'
@@ -41,6 +54,81 @@ CREATE TABLE modules (
   name          TEXT NOT NULL,                  -- e.g. 'Recruitment'
   UNIQUE (product_id, key)
 );
+
+-- ---------------------------------------------------------------------------
+-- Discovery/wizard sessions -- the pre-freeze part of the flow (Discovery
+-- Chat, Research, Identity & Theme, module breakdown, Flow Design review)
+-- doesn't map cleanly onto the normalized requirements/artifacts tables
+-- below -- it's exploratory and per-session, not yet a committed product.
+-- Stored as JSONB (the same shape as the app's SessionState model) so the
+-- wizard survives a redeploy without needing every field normalized up
+-- front; a session graduates into `products`/`modules`/`requirements` rows
+-- once BRD/PRD drafting actually starts (see generate_brd_prd in
+-- routers/wizard.py), at which point requirement_id back-references let
+-- both halves stay linked.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE wizard_sessions (
+  session_id    UUID PRIMARY KEY,
+  state         JSONB NOT NULL,          -- the full SessionState, incl. module_flows
+  product_id    UUID REFERENCES products(id),  -- set once the session graduates
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_wizard_sessions_updated ON wizard_sessions(updated_at);
+
+-- ---------------------------------------------------------------------------
+-- Module flows -- the Flow Design gate (2026-09-28 addition): the
+-- frontend+backend sequence flow for one module, reviewed via the same
+-- comment -> regenerate -> approve loop as BRD/PRD requirements, and the
+-- context BRD/PRD drafting is grounded in once approved. Lives per-module
+-- rather than per-requirement since it's produced (and approved) before any
+-- requirement row exists for that module.
+-- ---------------------------------------------------------------------------
+
+CREATE TYPE module_flow_status AS ENUM ('draft', 'revised', 'approved');
+
+CREATE TABLE module_flows (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id      UUID REFERENCES products(id),         -- NULL while still session-scoped
+  session_id      UUID REFERENCES wizard_sessions(session_id) ON DELETE CASCADE,
+  module          TEXT NOT NULL,
+  steps           TEXT[] NOT NULL DEFAULT '{}',
+  revised_steps   TEXT[],
+  status          module_flow_status NOT NULL DEFAULT 'draft',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (session_id, module)
+);
+
+-- ---------------------------------------------------------------------------
+-- Embeddings -- generic vector store for future RAG, following the same
+-- subject_kind/subject_id polymorphic pattern as comments/approvals/
+-- audit_events above rather than a bespoke table per content type. Not
+-- populated or queried by any code yet -- this just means the column type
+-- and index exist so a retrieval feature (e.g. "find past requirements/
+-- research similar to this new module" to ground Flow Design / BRD/PRD
+-- drafting) is a new query + a backfill job, not a schema migration.
+-- 1536 dims matches OpenAI text-embedding-3-small; revisit if the actual
+-- embedding model differs once this is wired up.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE embeddings (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subject_kind  TEXT NOT NULL,             -- 'requirement' | 'artifact' | 'research_finding' | 'module_flow' | ...
+  subject_id    UUID NOT NULL,
+  content_hash  TEXT NOT NULL,             -- detects stale embeddings when subject content changes
+  embedding     vector(1536) NOT NULL,
+  model         TEXT NOT NULL,             -- e.g. 'text-embedding-3-small'
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (subject_kind, subject_id, model)
+);
+
+CREATE INDEX idx_embeddings_subject ON embeddings(subject_kind, subject_id);
+-- IVFFlat needs rows present to pick a good `lists` value -- created once
+-- there's real data (Phase 2 migration), not here on an empty table.
+
 
 -- ---------------------------------------------------------------------------
 -- People
