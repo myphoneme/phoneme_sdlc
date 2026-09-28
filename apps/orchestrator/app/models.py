@@ -42,6 +42,23 @@ class ResearchReport(BaseModel):
     sources: list[str] = []
 
 
+class ModuleFlow(BaseModel):
+    """The key sequence flow for one module -- frontend + backend steps
+    interleaved, e.g. 'user forwards a WhatsApp message -> webhook fires ->
+    worker normalizes -> inbox UI shows it'. This is the human-in-the-loop
+    gate between Freeze Scope and BRD/PRD drafting: per the 2026-09-28
+    design-review thread, the BRD/PRD came out too abstract for an AI coding
+    agent to build from directly because nobody had pinned down *how* each
+    module actually works before the requirement text got drafted. Iterating
+    this flow with the user first (comment -> regenerate -> accept, same
+    loop as the BRD/PRD Manager) is what makes the eventual requirement
+    text -- and any code generated from it -- concrete instead of generic."""
+    module: str
+    steps: list[str] = []
+    revised_steps: Optional[list[str]] = None
+    status: str = "Draft"  # Draft -> Revised (pending review) -> Approved
+
+
 class SessionState(BaseModel):
     session_id: str
     messages: list[ChatMessage] = []
@@ -52,7 +69,8 @@ class SessionState(BaseModel):
     selected_name: Optional[str] = None
     selected_theme: Optional[str] = None
     modules: list[str] = []
-    stage: str = "discovery"  # discovery -> research -> identity -> freeze -> generating -> manager
+    module_flows: list[ModuleFlow] = []
+    stage: str = "discovery"  # discovery -> research -> identity -> freeze -> flow -> generating -> manager
 
 
 class ChatTurnRequest(BaseModel):
@@ -104,3 +122,18 @@ class CommentRequest(BaseModel):
 
 class AcceptRequest(BaseModel):
     req_id: str
+
+
+class FlowCommentRequest(BaseModel):
+    session_id: str
+    module: str
+    comment: str
+
+
+class FlowModuleRequest(BaseModel):
+    session_id: str
+    module: str
+
+
+class FlowFreezeRequest(BaseModel):
+    session_id: str

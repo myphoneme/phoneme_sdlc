@@ -3,9 +3,10 @@ import DiscoveryChat from "./stages/DiscoveryChat.jsx";
 import ResearchCard from "./stages/ResearchCard.jsx";
 import IdentityTheme from "./stages/IdentityTheme.jsx";
 import Generating from "./stages/Generating.jsx";
+import ModuleFlowReview from "./stages/ModuleFlowReview.jsx";
 import BrdPrdManager from "./stages/BrdPrdManager.jsx";
 
-const STAGES = ["discovery", "research", "identity", "freeze", "generating", "manager"];
+const STAGES = ["discovery", "research", "identity", "freeze", "flow", "generating", "manager"];
 
 export default function App() {
   const [session, setSession] = useState(null); // full SessionState from backend
@@ -25,7 +26,7 @@ export default function App() {
       </header>
 
       <nav className="stage-tracker">
-        {["Discovery Chat", "Research", "Identity & Theme", "Freeze Scope", "Generating", "BRD/PRD Manager"].map(
+        {["Discovery Chat", "Research", "Identity & Theme", "Freeze Scope", "Flow Design", "Generating", "BRD/PRD Manager"].map(
           (label, i) => (
             <div key={label} className={"stage-pip" + (i <= stageIndex ? " done" : "")}>
               <span className="stage-pip-dot" />
@@ -42,6 +43,7 @@ export default function App() {
         {stage === "freeze" && (
           <Generating session={session} setSession={setSession} setRequirements={setRequirements} freezeOnly />
         )}
+        {stage === "flow" && <ModuleFlowReview session={session} setSession={setSession} />}
         {stage === "generating" && (
           <Generating session={session} setSession={setSession} setRequirements={setRequirements} />
         )}

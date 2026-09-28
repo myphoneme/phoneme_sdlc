@@ -361,6 +361,10 @@ input:disabled { background: var(--surface-sunken); color: var(--grey-muted); cu
 
 .requirement-actions { display: flex; gap: 10px; margin-top: 14px; }
 
+.flow-step-list { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.flow-step-list li { font-size: 14.5px; line-height: 1.6; color: #333; }
+.flow-step-list-new li { color: #4a3b1f; }
+
 /* ---------- Scrollbar polish ---------- */
 .chat-log::-webkit-scrollbar { width: 8px; }
 .chat-log::-webkit-scrollbar-track { background: transparent; }
