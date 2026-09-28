@@ -65,7 +65,7 @@ def _research_context(state: SessionState) -> str:
 @router.post("/freeze", response_model=SessionState)
 async def freeze_scope(req: FreezeRequest):
     """Module-breakdown drafting that freezes scope — critical tier."""
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
 
@@ -92,7 +92,7 @@ async def freeze_scope(req: FreezeRequest):
     # user-confirmed) is exactly what produced BRD/PRD content too abstract
     # for a coding agent to build from without re-iterating.
     state.stage = "flow"
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
@@ -106,7 +106,7 @@ async def generate_flows(req: FreezeRequest):
     -- frontend + backend steps interleaved, the same shape as a manual
     tech-design pass, so the human-in-the-loop review has something concrete
     to react to rather than a bare module name."""
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
     if not state.modules:
@@ -144,7 +144,7 @@ async def generate_flows(req: FreezeRequest):
         ]
         state.module_flows.append(ModuleFlow(module=module, steps=steps, status="Draft"))
 
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
@@ -154,7 +154,7 @@ async def comment_flow(req: FlowCommentRequest):
     Manager's comment loop (routers/brdprd.py::comment_and_regenerate) so
     reviewers get the same familiar iterate-then-accept UX at this earlier
     gate."""
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
     flow = next((f for f in state.module_flows if f.module == req.module), None)
@@ -180,13 +180,13 @@ async def comment_flow(req: FlowCommentRequest):
     ]
     flow.revised_steps = revised
     flow.status = "Revised — needs re-review"
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
 @router.post("/flows/accept", response_model=SessionState)
 async def accept_flow(req: FlowModuleRequest):
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
     flow = next((f for f in state.module_flows if f.module == req.module), None)
@@ -196,13 +196,13 @@ async def accept_flow(req: FlowModuleRequest):
         flow.steps = flow.revised_steps
         flow.revised_steps = None
     flow.status = "Approved"
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
 @router.post("/flows/discard", response_model=SessionState)
 async def discard_flow(req: FlowModuleRequest):
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
     flow = next((f for f in state.module_flows if f.module == req.module), None)
@@ -210,7 +210,7 @@ async def discard_flow(req: FlowModuleRequest):
         raise HTTPException(404, "flow not found for module")
     flow.revised_steps = None
     flow.status = "Draft"
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
@@ -218,7 +218,7 @@ async def discard_flow(req: FlowModuleRequest):
 async def freeze_flows(req: FlowFreezeRequest):
     """The gate itself: only once every non-Platform-Core module's flow is
     Approved does scope move on to BRD/PRD drafting."""
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
     reviewable = [f for f in state.module_flows if not _is_platform_core(f.module)]
@@ -230,14 +230,14 @@ async def freeze_flows(req: FlowFreezeRequest):
             f"drafting can start: {', '.join(not_approved)}",
         )
     state.stage = "generating"
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
 @router.post("/generate", response_model=list[Requirement])
 async def generate_brd_prd(req: GenerateRequest):
     """BRD/PRD requirement drafting and generation — critical tier."""
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
     if not state.modules:
@@ -276,9 +276,9 @@ async def generate_brd_prd(req: GenerateRequest):
             body=_strip_markdown(rest.strip()) or _strip_markdown(text),
             status="Draft",
         )
-        store.add_requirement(state.session_id, r)
+        await store.add_requirement(state.session_id, r)
         generated.append(r)
 
     state.stage = "manager"
-    store.save_session(state)
+    await store.save_session(state)
     return generated

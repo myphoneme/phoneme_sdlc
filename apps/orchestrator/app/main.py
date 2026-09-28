@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config
+from . import config, store
 from .routers import discovery, wizard, brdprd
 
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +40,13 @@ app.add_middleware(
 app.include_router(discovery.router)
 app.include_router(wizard.router)
 app.include_router(brdprd.router)
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    """Close the DB connection pool cleanly on reload/restart rather than
+    leaking it (store.py's engine is created lazily on first use)."""
+    await store.dispose_engine()
 
 
 @app.get("/api/health")

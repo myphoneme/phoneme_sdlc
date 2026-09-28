@@ -143,7 +143,7 @@ def _parse_research_report(raw_text: str) -> tuple[ResearchReport, list[str]]:
 
 @router.post("/start", response_model=SessionState)
 async def start_session(req: StartSessionRequest):
-    state = store.new_session()
+    state = await store.new_session()
     state.messages.append(ChatMessage(role="user", text=req.initial_message))
 
     result = await ai_router.generate(
@@ -158,13 +158,13 @@ async def start_session(req: StartSessionRequest):
         ),
     )
     state.messages.append(ChatMessage(role="assistant", text=result["text"]))
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
 @router.post("/chat", response_model=SessionState)
 async def chat_turn(req: ChatTurnRequest):
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
 
@@ -191,7 +191,7 @@ async def chat_turn(req: ChatTurnRequest):
     if "CONCEPT SUMMARY:" in result["text"]:
         state.concept_summary = result["text"].split("CONCEPT SUMMARY:", 1)[1].strip()
         state.stage = "research"
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
@@ -205,7 +205,7 @@ async def run_research(req: ChatTurnRequest):
     and monetization models -- matching the depth of a manual
     Perplexity/Gemini research pass rather than a bare competitor list.
     """
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
     basis = state.concept_summary or req.message
@@ -237,7 +237,7 @@ async def run_research(req: ChatTurnRequest):
         f"{row.category}: {row.examples}" for row in report.market_landscape
     ]  # legacy flat field kept in sync for any old rendering path
     state.suggested_names = names or state.suggested_names
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
@@ -245,7 +245,7 @@ async def run_research(req: ChatTurnRequest):
 async def research_more(req: ResearchMoreRequest):
     """The 'search for more similar companies' continuation loop -- appends
     additional market-landscape rows grounded in the same web-search tool."""
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
 
@@ -293,14 +293,14 @@ async def research_more(req: ResearchMoreRequest):
             existing.sources.append(s)
     state.research = existing
     state.companies = [f"{row.category}: {row.examples}" for row in existing.market_landscape]
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
 @router.post("/name-check", response_model=SessionState)
 async def check_name(req: NameCheckRequest):
     """Custom brand-name availability check — non-critical NLU tier."""
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
 
@@ -312,35 +312,35 @@ async def check_name(req: NameCheckRequest):
         system="You are a lightweight brand-name availability assistant. This is not a legal opinion.",
     )
     state.messages.append(ChatMessage(role="assistant", text=f"[{req.name}] {result['text']}"))
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
 @router.post("/select-name", response_model=SessionState)
 async def select_name(req: SelectNameRequest):
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
     state.selected_name = req.name
     state.stage = "identity"
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
 @router.post("/select-theme", response_model=SessionState)
 async def select_theme(req: SelectThemeRequest):
-    state = store.get_session(req.session_id)
+    state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
     state.selected_theme = req.theme
     state.stage = "freeze"
-    store.save_session(state)
+    await store.save_session(state)
     return state
 
 
 @router.get("/{session_id}", response_model=SessionState)
 async def get_session(session_id: str):
-    state = store.get_session(session_id)
+    state = await store.get_session(session_id)
     if not state:
         raise HTTPException(404, "session not found")
     return state
