@@ -33,7 +33,7 @@ HOST="0.0.0.0"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 ORCH_DIR="$LIVE_DIR/apps/orchestrator"
-WEB_DIR="$LIVE_DIR/apps/web"
+WEB_DIR="$LIVE_DIR/apps/givewings-phoneme-react"
 ENV_FILE="$ORCH_DIR/.env"
 PID_FILE="$LIVE_DIR/backend.pid"
 LOG_FILE="$LIVE_DIR/backend.log"

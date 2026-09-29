@@ -338,6 +338,16 @@ async def select_theme(req: SelectThemeRequest):
     return state
 
 
+@router.get("")
+async def list_sessions():
+    """Summary rows for the GiveWings dashboard's product grid. Defined
+    ahead of GET /{session_id} below (both route decorators sit on this same
+    `router`, prefixed with /api/discovery) so Starlette resolves an exact
+    '/api/discovery' request to this handler rather than ever trying to
+    match it against the {session_id} path parameter route."""
+    return await store.list_sessions()
+
+
 @router.get("/{session_id}", response_model=SessionState)
 async def get_session(session_id: str):
     state = await store.get_session(session_id)

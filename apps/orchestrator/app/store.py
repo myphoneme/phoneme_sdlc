@@ -25,6 +25,7 @@ durability fix this module exists for.
 """
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import Column, DateTime, MetaData, Table, func
@@ -73,6 +74,15 @@ _engine: Optional[AsyncEngine] = None
 # --- in-memory fallback (unchanged pilot behavior) for local/dev sqlite ---
 _sessions: dict[str, SessionState] = {}
 _requirements: dict[str, dict[str, Requirement]] = {}
+# created_at/updated_at for the in-memory path -- the dict above has no
+# timestamp columns the way wizard_sessions does, but list_sessions() (added
+# for the dashboard) needs both to sort by recency and show "Started X ago",
+# so track them alongside it here.
+_meta: dict[str, dict] = {}
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def get_engine() -> AsyncEngine:
@@ -121,6 +131,8 @@ async def new_session() -> SessionState:
     if not _USE_DB:
         _sessions[sid] = state
         _requirements[sid] = {}
+        now = _now_iso()
+        _meta[sid] = {"created_at": now, "updated_at": now}
         return state
 
     engine = get_engine()
@@ -143,6 +155,8 @@ async def get_session(session_id: str) -> Optional[SessionState]:
 async def save_session(state: SessionState) -> None:
     if not _USE_DB:
         _sessions[state.session_id] = state
+        now = _now_iso()
+        _meta.setdefault(state.session_id, {"created_at": now}).update(updated_at=now)
         return
 
     raw = await _load_row(state.session_id)
@@ -202,3 +216,62 @@ async def get_requirement(session_id: str, req_id: str) -> Optional[Requirement]
         return None
     _, reqs = _from_envelope(raw)
     return reqs.get(req_id)
+
+
+def _display_name(state: SessionState) -> str:
+    """The dashboard card's title for a session that may not have a
+    selected_name yet -- falls back to a short prefix of the concept
+    summary, then to a plain placeholder, rather than showing a bare id."""
+    if state.selected_name:
+        return state.selected_name
+    if state.concept_summary:
+        summary = state.concept_summary.strip()
+        return (summary[:60] + "…") if len(summary) > 60 else summary
+    return "Untitled idea"
+
+
+async def list_sessions() -> list[dict]:
+    """Summary rows for the dashboard's product grid -- session_id, a
+    display name, the real stage, and both timestamps, newest-updated
+    first. Deliberately not the full SessionState (messages/research/etc.)
+    since the dashboard only needs enough to render a card; the wizard view
+    fetches the full state itself via get_session() once a card is opened."""
+    if not _USE_DB:
+        rows = [
+            {
+                "session_id": sid,
+                "name": _display_name(state),
+                "stage": state.stage,
+                "created_at": _meta.get(sid, {}).get("created_at"),
+                "updated_at": _meta.get(sid, {}).get("updated_at") or _meta.get(sid, {}).get("created_at"),
+            }
+            for sid, state in _sessions.items()
+        ]
+        rows.sort(key=lambda r: r["updated_at"] or "", reverse=True)
+        return rows
+
+    engine = get_engine()
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            select(
+                wizard_sessions.c.session_id,
+                wizard_sessions.c.state,
+                wizard_sessions.c.created_at,
+                wizard_sessions.c.updated_at,
+            ).order_by(wizard_sessions.c.updated_at.desc())
+        )
+        db_rows = result.all()
+
+    rows = []
+    for row in db_rows:
+        state, _ = _from_envelope(row.state)
+        rows.append(
+            {
+                "session_id": row.session_id,
+                "name": _display_name(state),
+                "stage": state.stage,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            }
+        )
+    return rows

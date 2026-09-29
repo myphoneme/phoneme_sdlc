@@ -6,9 +6,11 @@ Run on staging:    see src/backend/README.md (systemd unit / process manager
                     per BRD/PRD Section 18.7 — one process per project).
 
 Until the API Gateway (BRD/PRD Section 18.6) is provisioned, this process
-also serves the built frontend (../web/dist) directly, per the frontend
-README's staging note -- so one process on one port serves both the API
-and the wizard UI, with no CORS/reverse-proxy setup required on staging.
+also serves the built frontend (../givewings-phoneme-react/dist) directly,
+per the frontend README's staging note -- so one process on one port serves
+both the API and the merged dashboard+wizard UI, with no CORS/reverse-proxy
+setup required on staging. apps/web is the wizard-only frontend this was
+merged from; it is kept in the tree but is no longer built or served.
 """
 import logging
 from pathlib import Path
@@ -58,11 +60,11 @@ async def health():
     }
 
 
-# --- Static frontend (apps/web/dist), mounted after the API routes above so
-# /api/* is always matched first. Absent in local dev unless `npm run build`
-# has been run; staging should build the frontend before starting this
-# process (see apps/web/README.md).
-FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
+# --- Static frontend (apps/givewings-phoneme-react/dist), mounted after the
+# API routes above so /api/* is always matched first. Absent in local dev
+# unless `npm run build` has been run; staging should build the frontend
+# before starting this process (see apps/givewings-phoneme-react/README.md).
+FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "givewings-phoneme-react" / "dist"
 
 if FRONTEND_DIST.is_dir():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
@@ -79,6 +81,7 @@ if FRONTEND_DIST.is_dir():
         return FileResponse(FRONTEND_DIST / "index.html")
 else:
     logging.getLogger("phoneme.main").warning(
-        "apps/web/dist not found -- frontend not mounted. Run `npm run build` "
-        "in apps/web/ before starting this process to serve the UI too."
+        "apps/givewings-phoneme-react/dist not found -- frontend not mounted. "
+        "Run `npm run build` in apps/givewings-phoneme-react/ before starting "
+        "this process to serve the UI too."
     )
