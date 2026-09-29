@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
+import { AlertTriangle, BadgeCheck, Coins, ExternalLink, Lightbulb, Search, Star, Target, TrendingUp } from "lucide-react";
 import { api } from "../api.js";
+
+function Section({ icon: Icon, title, children }) {
+  return (
+    <section className="research-section">
+      <h3><span className="section-icon" aria-hidden="true"><Icon size={16} /></span>{title}</h3>
+      {children}
+    </section>
+  );
+}
 
 export default function ResearchCard({ session, setSession }) {
   const [loading, setLoading] = useState(false);
@@ -60,29 +70,22 @@ export default function ResearchCard({ session, setSession }) {
   const suggestedNames = session.suggested_names?.length ? session.suggested_names : [];
 
   return (
-    <div className="stage-card">
-      <h2>Competitive Research</h2>
-      <p className="stage-hint">
-        Web-search-grounded market research: who else plays in this space, whether it's viable
-        for revenue, what to build, and how to price it.
-      </p>
-
-      {loading && !hasReport && <div className="stage-hint">Researching the live web…</div>}
+    <div className="research">
+      {loading && !hasReport && (
+        <div className="working" role="status">
+          <span className="spinner" aria-hidden="true" />
+          <div><strong>Researching the live web…</strong><p>Scanning competitors, pricing and demand signals. This usually takes under a minute.</p></div>
+        </div>
+      )}
 
       {hasReport && (
         <div className="research-report">
           {research.market_landscape?.length > 0 && (
-            <section className="research-section">
-              <h3>Market landscape</h3>
+            <Section icon={Target} title="Market landscape">
               <div className="research-table-wrap">
                 <table className="research-table">
                   <thead>
-                    <tr>
-                      <th>Category</th>
-                      <th>Examples</th>
-                      <th>What they do</th>
-                      <th>Limitations</th>
-                    </tr>
+                    <tr><th>Category</th><th>Examples</th><th>What they do</th><th>Limitations</th></tr>
                   </thead>
                   <tbody>
                     {research.market_landscape.map((row, i) => (
@@ -96,155 +99,115 @@ export default function ResearchCard({ session, setSession }) {
                   </tbody>
                 </table>
               </div>
-            </section>
+            </Section>
           )}
 
-          {research.viability_verdict && (
-            <section className="research-section">
-              <h3>Viability &amp; revenue verdict</h3>
-              <p className="research-verdict">{research.viability_verdict}</p>
-            </section>
+          {(research.viability_verdict || research.positioning_reframe || research.killer_feature) && (
+            <div className="insight-grid">
+              {research.viability_verdict && (
+                <div className="insight"><span className="insight-label"><BadgeCheck size={15} /> Viability &amp; revenue</span><p>{research.viability_verdict}</p></div>
+              )}
+              {research.positioning_reframe && (
+                <div className="insight"><span className="insight-label"><Lightbulb size={15} /> Positioning</span><p>{research.positioning_reframe}</p></div>
+              )}
+              {research.killer_feature && (
+                <div className="insight accent"><span className="insight-label"><Star size={15} /> Killer feature</span><p>{research.killer_feature}</p></div>
+              )}
+            </div>
           )}
 
-          {research.positioning_reframe && (
-            <section className="research-section">
-              <h3>Positioning</h3>
-              <p className="research-verdict research-reframe">{research.positioning_reframe}</p>
-            </section>
-          )}
-
-          {research.killer_feature && (
-            <section className="research-section">
-              <h3>Killer feature</h3>
-              <p className="research-verdict research-killer-feature">{research.killer_feature}</p>
-            </section>
-          )}
-
-          {research.market_demand?.length > 0 && (
-            <section className="research-section">
-              <h3>Market demand signals</h3>
-              <ul className="research-bullet-list">
-                {research.market_demand.map((b, i) => (
-                  <li key={i}>{b}</li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {research.risks?.length > 0 && (
-            <section className="research-section">
-              <h3>Risks &amp; constraints</h3>
-              <ul className="research-bullet-list research-risk-list">
-                {research.risks.map((b, i) => (
-                  <li key={i}>{b}</li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {research.recommended_features?.length > 0 && (
-            <section className="research-section">
-              <h3>Recommended features</h3>
-              <ul className="research-bullet-list">
-                {research.recommended_features.map((b, i) => (
-                  <li key={i}>{b}</li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {research.monetization?.length > 0 && (
-            <section className="research-section">
-              <h3>Monetization model</h3>
-              <ul className="research-bullet-list">
-                {research.monetization.map((b, i) => (
-                  <li key={i}>{b}</li>
-                ))}
-              </ul>
-            </section>
-          )}
+          <div className="list-grid">
+            {research.market_demand?.length > 0 && (
+              <Section icon={TrendingUp} title="Market demand signals">
+                <ul className="research-bullet-list">{research.market_demand.map((b, i) => <li key={i}>{b}</li>)}</ul>
+              </Section>
+            )}
+            {research.risks?.length > 0 && (
+              <Section icon={AlertTriangle} title="Risks & constraints">
+                <ul className="research-bullet-list risk">{research.risks.map((b, i) => <li key={i}>{b}</li>)}</ul>
+              </Section>
+            )}
+            {research.recommended_features?.length > 0 && (
+              <Section icon={Lightbulb} title="Recommended features">
+                <ul className="research-bullet-list">{research.recommended_features.map((b, i) => <li key={i}>{b}</li>)}</ul>
+              </Section>
+            )}
+            {research.monetization?.length > 0 && (
+              <Section icon={Coins} title="Monetization model">
+                <ul className="research-bullet-list">{research.monetization.map((b, i) => <li key={i}>{b}</li>)}</ul>
+              </Section>
+            )}
+          </div>
 
           {research.sources?.length > 0 && (
-            <section className="research-section">
-              <h3>Sources</h3>
-              <ul className="research-sources-list">
+            <details className="sources">
+              <summary>{research.sources.length} sources</summary>
+              <ul>
                 {research.sources.map((url, i) => (
-                  <li key={i}>
-                    <a href={url} target="_blank" rel="noopener noreferrer">
-                      {url}
-                    </a>
-                  </li>
+                  <li key={i}><a href={url} target="_blank" rel="noopener noreferrer">{url}<ExternalLink size={12} aria-hidden="true" /></a></li>
                 ))}
               </ul>
-            </section>
+            </details>
           )}
         </div>
       )}
 
       {!hasReport && !loading && session.companies.length > 0 && (
-        <div className="research-card">
+        <div className="found-list">
           {session.companies.map((c, i) => (
-            <div key={i} className="research-row">
-              <span className="chip accent">Found</span>
-              <span>{c}</span>
-            </div>
+            <div key={i} className="found-row"><span className="chip accent">Found</span><span>{c}</span></div>
           ))}
         </div>
       )}
 
-      <div className="research-more-row">
+      <div className="inline-field">
+        <Search size={17} aria-hidden="true" />
         <input
           value={moreQuery}
           onChange={(e) => setMoreQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && searchMore()}
           placeholder="Search for more similar companies…"
+          aria-label="Search for more similar companies"
           disabled={loading}
         />
-        <button className="btn-secondary" onClick={searchMore} disabled={loading || !moreQuery.trim()}>
-          Search
-        </button>
+        <button className="btn-secondary" onClick={searchMore} disabled={loading || !moreQuery.trim()}>Search</button>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      {error && <div className="error-banner" role="alert">{error}</div>}
 
-      <hr className="divider" />
-
-      <h3>Pick a product name</h3>
-      {suggestedNames.length > 0 ? (
-        <div className="choice-row">
-          {suggestedNames.map((n) => (
-            <button key={n} className="opt-chip" disabled={checking} onClick={() => checkAndSelect(n)}>
-              {n}
-            </button>
-          ))}
+      <section className="decision-card">
+        <div className="decision-head">
+          <span className="step-badge">Next</span>
+          <div>
+            <h3>Pick a product name</h3>
+            <p>Choose a suggestion or type your own — GiveWings checks availability before using it.</p>
+          </div>
         </div>
-      ) : (
-        <p className="stage-hint">
-          {loading ? "Generating name ideas from your concept…" : "Type a name below to check and use it."}
-        </p>
-      )}
-
-      <div className="custom-name-row">
-        <input
-          value={customName}
-          onChange={(e) => setCustomName(e.target.value)}
-          placeholder="Or type your own name…"
-          disabled={checking}
-        />
-        <button
-          className="btn-secondary"
-          disabled={checking || !customName.trim()}
-          onClick={() => checkAndSelect(customName.trim())}
-        >
-          {checking ? "Checking…" : "Check availability & use"}
-        </button>
-      </div>
-
-      {session.selected_name && (
-        <div className="concept-summary-card">
-          Selected: <strong>{session.selected_name}</strong> — moving to theme selection…
+        {suggestedNames.length > 0 ? (
+          <div className="choice-row">
+            {suggestedNames.map((n) => (
+              <button key={n} className="opt-chip" disabled={checking} onClick={() => checkAndSelect(n)}>{n}</button>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">{loading ? "Generating name ideas from your concept…" : "Type a name below to check and use it."}</p>
+        )}
+        <div className="inline-field">
+          <input
+            value={customName}
+            onChange={(e) => setCustomName(e.target.value)}
+            placeholder="Or type your own name…"
+            aria-label="Your own product name"
+            disabled={checking}
+          />
+          <button className="btn-primary" disabled={checking || !customName.trim()} onClick={() => checkAndSelect(customName.trim())}>
+            {checking ? "Checking…" : "Check & use name"}
+          </button>
         </div>
-      )}
+        {session.selected_name && (
+          <div className="callout success"><BadgeCheck size={20} aria-hidden="true" /><div><strong>{session.selected_name}</strong><p>Name selected — moving to theme selection…</p></div></div>
+        )}
+      </section>
     </div>
   );
 }

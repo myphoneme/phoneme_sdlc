@@ -122,13 +122,18 @@ export default function BrdPrdManager({ session, requirements, setRequirements }
     setRequirements((reqs) => reqs.map((r) => (r.req_id === updated.req_id ? updated : r)));
   }
 
+  const frozen = requirements.filter((r) => r.status === "Frozen").length;
+
   return (
-    <div className="stage-card">
-      <h2>BRD/PRD Manager — {session.selected_name}</h2>
-      <p className="stage-hint">
-        Review each drafted requirement. Comment to request a revision (routed through the commercial
-        model tier), then Accept &amp; commit or Discard, and Freeze once approved.
-      </p>
+    <div className="review">
+      {requirements.length > 0 ? (
+        <div className="review-summary">
+          <span><strong>{frozen}</strong> of {requirements.length} requirements frozen for <strong>{session.selected_name}</strong></span>
+          <span className="review-meter" aria-hidden="true"><i style={{ width: `${(frozen / requirements.length) * 100}%` }} /></span>
+        </div>
+      ) : (
+        <p className="muted">No requirements drafted yet.</p>
+      )}
       <div className="requirement-feed">
         {requirements.map((r) => (
           <RequirementCard key={r.req_id} sessionId={session.session_id} req={r} onChange={handleChange} />

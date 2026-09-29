@@ -52,6 +52,7 @@ function FlowCard({ sessionId, flow, onChange }) {
     <div className="requirement-card">
       <div className="requirement-header">
         <span className="req-title">{flow.module}</span>
+        <span className="req-count">{flow.steps.length} steps</span>
         <span className={statusClass(flow.status)}>{flow.status}</span>
       </div>
 
@@ -148,19 +149,24 @@ export default function ModuleFlowReview({ session, setSession }) {
 
   if (!session) return null;
 
-  return (
-    <div className="stage-card">
-      <h2>Flow Design — key sequence flow per module</h2>
-      <p className="stage-hint">
-        Before BRD/PRD drafting starts, pin down how each module actually works — the frontend + backend
-        steps in order. Comment to redirect a flow, approve it once it's right, then continue once every
-        module is approved so the requirements that follow are grounded in a concrete mechanism.
-      </p>
+  const approvedCount = reviewable.filter((f) => f.status === "Approved").length;
 
+  return (
+    <div className="review">
       {loading && (session?.module_flows || []).length === 0 && (
-        <div className="stage-hint">Drafting sequence flows for each module…</div>
+        <div className="working" role="status">
+          <span className="spinner" aria-hidden="true" />
+          <div><strong>Drafting sequence flows for each module…</strong><p>Frontend and backend steps, in order, for every module.</p></div>
+        </div>
       )}
-      {error && <div className="error-banner">{error}</div>}
+      {error && <div className="error-banner" role="alert">{error}</div>}
+
+      {reviewable.length > 0 && (
+        <div className="review-summary">
+          <span><strong>{approvedCount}</strong> of {reviewable.length} module flows approved</span>
+          <span className="review-meter" aria-hidden="true"><i style={{ width: `${(approvedCount / reviewable.length) * 100}%` }} /></span>
+        </div>
+      )}
 
       <div className="requirement-feed">
         {reviewable.map((f) => (
@@ -168,11 +174,10 @@ export default function ModuleFlowReview({ session, setSession }) {
         ))}
       </div>
 
-      <hr className="divider" />
-
-      <div className="requirement-actions">
+      <div className="sticky-actions">
+        <span className="muted">{allApproved ? "All flows approved — ready to draft requirements." : "Approve every module flow to continue."}</span>
         <button className="btn-primary" disabled={loading || !allApproved} onClick={freezeFlows}>
-          {allApproved ? "Freeze flows & continue to BRD/PRD" : "Approve every module flow to continue"}
+          Freeze flows &amp; continue
         </button>
       </div>
     </div>

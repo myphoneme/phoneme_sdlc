@@ -30,7 +30,57 @@ const aiActions = [
   { icon: Rocket, title: 'Create a launch plan', subtitle: 'Go to market with confidence' },
 ];
 
+// One-line description + icon per wizard stage. Rendered by WizardView as
+// the uniform panel header and the journey sidebar, so every stage shares
+// the same frame instead of each component inventing its own heading.
+const STAGE_META = {
+  discovery: { icon: MessageCircle, title: 'Discovery Chat', short: 'Shape the concept', desc: 'Describe your idea in plain words. GiveWings AI reflects it back and asks clarifying questions until the scope is clear enough to research.' },
+  research: { icon: Search, title: 'Market Research', short: 'Competitors & viability', desc: 'Live, web-grounded research: who already plays in this space, whether it can make money, what to build first — then pick a product name.' },
+  identity: { icon: WandSparkles, title: 'Identity & Theme', short: 'Name & visual theme', desc: 'Choose the visual theme the product will carry through its documents and screens.' },
+  freeze: { icon: Target, title: 'Freeze Scope', short: 'Lock the module list', desc: 'The concept is broken into modules. Shared Platform-Core modules link to the common contract instead of being drafted again.' },
+  flow: { icon: Layers3, title: 'Flow Design', short: 'How each module works', desc: 'Pin down the step-by-step sequence for every module. Comment to redirect a flow, approve it when it is right.' },
+  generating: { icon: Sparkles, title: 'Drafting BRD/PRD', short: 'AI writes requirements', desc: 'GiveWings AI drafts the requirements for each approved module.' },
+  manager: { icon: FileText, title: 'BRD/PRD Manager', short: 'Review, revise, freeze', desc: 'Review each drafted requirement. Comment to request a revision, accept or discard it, and freeze once approved.' },
+};
+
 function IconBox({ icon: Icon, tone = 'orange' }) { return <span className={`icon-box ${tone}`}><Icon size={22} strokeWidth={2} /></span>; }
+
+// Shared top navigation — the SAME bar on the dashboard and every wizard
+// page, so moving into an idea never feels like switching apps.
+function TopBar({ active = 'Home', query, onQuery, onHome }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  return (
+    <header className="topbar">
+      <div className="top-inner">
+        <a className="wordmark" href="#home" aria-label="GiveWings home" onClick={e => { if (onHome) { e.preventDefault(); onHome(); } }}>
+          <span className="wing-mark"><Zap size={20} fill="currentColor" /></span><span>GiveWings</span>
+        </a>
+        <span className="nav-divider" />
+        <nav className={`main-nav ${mobileOpen ? 'open' : ''}`} aria-label="Main navigation">
+          {['Home', 'Ideas', 'Products', 'Roadmap', 'Team', 'Resources'].map(item => (
+            <a key={item} className={item === active ? 'active' : ''} href={item === 'Products' ? '#products' : '#home'}
+              aria-current={item === active ? 'page' : undefined}
+              onClick={e => { setMobileOpen(false); if (onHome && (item === 'Home' || item === 'Products')) { e.preventDefault(); onHome(); } }}>{item}</a>
+          ))}
+        </nav>
+        <div className="header-actions">
+          {onQuery && (
+            <label className="global-search">
+              <Search size={19} />
+              <input value={query} onChange={e => onQuery(e.target.value)} placeholder="Search products..." aria-label="Search products" />
+              <kbd>⌘ K</kbd>
+            </label>
+          )}
+          <button className="header-icon" aria-label="Notifications"><Bell size={20} /><span className="notification-dot" /></button>
+          <button className="profile" aria-label="Profile settings"><span>YOU</span><ChevronDown size={15} /></button>
+          <button className="mobile-toggle" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu" aria-expanded={mobileOpen}>
+            {mobileOpen ? <X /> : <Menu />}
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+}
 
 // Deterministic (not random) so a card doesn't change color on every
 // re-render -- picks a decorative tone from the session_id, purely cosmetic.
@@ -106,7 +156,6 @@ function Dashboard({ sessions, loading, error, onOpen, onCreate, onRetry }) {
   const [modal, setModal] = useState(null); // 'new' | null
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     const listener = e => { if (e.key === 'Escape') setModal(null); };
@@ -143,30 +192,7 @@ function Dashboard({ sessions, loading, error, onOpen, onCreate, onRetry }) {
 
   return (
     <>
-      <header className="topbar">
-        <div className="top-inner">
-          <a className="wordmark" href="#home" aria-label="GiveWings home"><span className="wing-mark"><Zap size={20} fill="currentColor" /></span><span>GiveWings</span></a>
-          <span className="nav-divider" />
-          <nav className={`main-nav ${mobileOpen ? 'open' : ''}`} aria-label="Main navigation">
-            {['Home', 'Ideas', 'Products', 'Roadmap', 'Team', 'Resources'].map((item, i) => (
-              <a key={item} className={i === 0 ? 'active' : ''} href={i === 0 ? '#home' : i === 2 ? '#products' : '#home'}
-                onClick={() => setMobileOpen(false)}>{item}</a>
-            ))}
-          </nav>
-          <div className="header-actions">
-            <label className="global-search">
-              <Search size={19} />
-              <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search products..." aria-label="Search products" />
-              <kbd>⌘ K</kbd>
-            </label>
-            <button className="header-icon" aria-label="Notifications"><Bell size={20} /><span className="notification-dot" /></button>
-            <button className="profile" aria-label="Profile settings"><span>YOU</span><ChevronDown size={15} /></button>
-            <button className="mobile-toggle" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu" aria-expanded={mobileOpen}>
-              {mobileOpen ? <X /> : <Menu />}
-            </button>
-          </div>
-        </div>
-      </header>
+      <TopBar active="Home" query={query} onQuery={setQuery} />
 
       <main id="home" className="dashboard">
         <div className="intro-grid">
@@ -285,27 +311,98 @@ function Dashboard({ sessions, loading, error, onOpen, onCreate, onRetry }) {
   );
 }
 
+// Title for the workspace header: the chosen product name once there is
+// one, otherwise a short, honest excerpt of the idea itself.
+function workspaceTitle(session) {
+  if (session?.selected_name) return session.selected_name;
+  const first = session?.messages?.find(m => m.role === 'user')?.text || session?.concept_summary || '';
+  const clean = first.replace(/^\s*idea\s*:+\s*/i, '').trim();
+  if (!clean) return 'New idea';
+  const cut = clean.split(/[.!?\n]/)[0];
+  return cut.length > 48 ? cut.slice(0, 46).trimEnd() + '…' : cut;
+}
+
+function JourneyRail({ stageIndex }) {
+  return (
+    <aside className="journey" aria-label="Idea journey">
+      <div className="journey-head">
+        <span className="journey-eyebrow">Idea journey</span>
+        <span className="journey-count">{stageIndex + 1}<small>/{STAGES.length}</small></span>
+      </div>
+      <div className="journey-bar" aria-hidden="true"><span style={{ width: `${((stageIndex + 1) / STAGES.length) * 100}%` }} /></div>
+      <ol className="journey-steps">
+        {STAGES.map((s, i) => {
+          const meta = STAGE_META[s];
+          const state = i < stageIndex ? 'done' : i === stageIndex ? 'current' : 'todo';
+          return (
+            <li key={s} className={`journey-step ${state}`} aria-current={state === 'current' ? 'step' : undefined}>
+              <span className="journey-dot">{state === 'done' ? <Check size={13} strokeWidth={3} /> : i + 1}</span>
+              <span className="journey-copy">
+                <strong>{meta.title}</strong>
+                <small>{state === 'done' ? 'Completed' : state === 'current' ? 'In progress' : meta.short}</small>
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      <div className="journey-tip">
+        <span className="journey-tip-icon"><Sparkles size={16} /></span>
+        <p>Everything is saved as you go. Close the tab and come back any time — you will resume right here.</p>
+      </div>
+    </aside>
+  );
+}
+
 function WizardView({ session, setSession, requirements, setRequirements, onBack }) {
   const stage = session?.stage || 'discovery';
-  const stageIndex = STAGES.indexOf(stage);
+  const stageIndex = Math.max(0, STAGES.indexOf(stage));
+  const meta = STAGE_META[stage] || STAGE_META.discovery;
+  const status = statusFor(stage);
+  const title = workspaceTitle(session);
+  const StageIcon = meta.icon;
   return (
     <div className="wizard-shell">
-      <header className="app-header">
-        <a className="wordmark" href="#home" aria-label="GiveWings home"><span className="wing-mark"><Zap size={20} fill="currentColor" /></span><span>GiveWings</span></a>
-        <div className="header-title">SDLC Platform — Idea to BRD/PRD</div>
-        <button type="button" className="btn-secondary" onClick={onBack}>← Back to dashboard</button>
-      </header>
+      <TopBar active="Products" onHome={onBack} />
 
-      <nav className="stage-tracker">
-        {STAGE_LABELS.map((label, i) => (
-          <div key={label} className={'stage-pip' + (i <= stageIndex ? ' done' : '')}>
-            <span className="stage-pip-dot" />
-            {label}
+      <section className="ws-header">
+        <div className="ws-header-inner">
+          <nav className="crumbs" aria-label="Breadcrumb">
+            <a href="#home" onClick={e => { e.preventDefault(); onBack(); }}>Products</a>
+            <ChevronRight size={14} aria-hidden="true" />
+            <span aria-current="page">{title}</span>
+          </nav>
+          <div className="ws-title-row">
+            <div className="ws-title">
+              <span className="ws-mark" aria-hidden="true">{title.charAt(0).toUpperCase()}</span>
+              <div>
+                <h1>{title}</h1>
+                <div className="ws-meta">
+                  <span className={`status ${status.cls}`}><span /> {status.label}</span>
+                  <span className="ws-meta-dot" aria-hidden="true">•</span>
+                  <span>Step {stageIndex + 1} of {STAGES.length} · {meta.title}</span>
+                </div>
+              </div>
+            </div>
+            <button type="button" className="btn-secondary" onClick={onBack}>
+              <ArrowRight size={16} className="flip" /> All products
+            </button>
           </div>
-        ))}
-      </nav>
+        </div>
+      </section>
 
-      <main className="app-main">
+      <div className="ws-body">
+        <JourneyRail stageIndex={stageIndex} />
+
+        <main className="stage-panel" key={stage}>
+          <header className="stage-panel-head">
+            <span className="stage-panel-icon" aria-hidden="true"><StageIcon size={22} /></span>
+            <div>
+              <span className="stage-eyebrow">Step {stageIndex + 1} · {meta.short}</span>
+              <h2>{meta.title}</h2>
+              <p>{meta.desc}</p>
+            </div>
+          </header>
+          <div className="stage-panel-body">
         {stage === 'discovery' && <DiscoveryChat session={session} setSession={setSession} />}
         {stage === 'research' && <ResearchCard session={session} setSession={setSession} />}
         {stage === 'identity' && <IdentityTheme session={session} setSession={setSession} />}
@@ -319,7 +416,9 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
         {stage === 'manager' && (
           <BrdPrdManager session={session} requirements={requirements} setRequirements={setRequirements} />
         )}
-      </main>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
@@ -427,7 +526,11 @@ export default function App() {
   if (rehydrating) {
     return (
       <div className="wizard-shell">
-        <main className="app-main"><div className="stage-card"><p className="stage-hint">Resuming your session…</p></div></main>
+        <TopBar active="Products" />
+        <div className="resume-screen" role="status">
+          <span className="spinner" aria-hidden="true" />
+          <p>Resuming where you left off…</p>
+        </div>
       </div>
     );
   }

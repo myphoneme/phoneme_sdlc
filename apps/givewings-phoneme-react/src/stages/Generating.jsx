@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
+import { Boxes, Link2 } from "lucide-react";
 import { api } from "../api.js";
+
+function Working({ title, text }) {
+  return (
+    <div className="working" role="status">
+      <span className="spinner" aria-hidden="true" />
+      <div><strong>{title}</strong><p>{text}</p></div>
+    </div>
+  );
+}
 
 export default function Generating({ session, setSession, setRequirements, freezeOnly }) {
   const [loading, setLoading] = useState(false);
@@ -35,34 +45,45 @@ export default function Generating({ session, setSession, setRequirements, freez
 
   if (freezeOnly) {
     return (
-      <div className="stage-card">
-        <h2>Freeze Scope — Module Breakdown</h2>
-        <p className="stage-hint">Platform-Core modules (auth/security/gateway) link to the shared contract instead of being drafted per project.</p>
-        {error && <div className="error-banner">{error}</div>}
-        {loading && session.modules.length === 0 && <div className="stage-hint">Drafting module breakdown…</div>}
-        <ul className="module-list">
-          {session.modules.map((m, i) => (
-            <li key={i} className={m.startsWith("Platform-Core") ? "module-platform-core" : ""}>
-              {m}
-            </li>
-          ))}
-        </ul>
+      <div className="freeze">
+        {error && <div className="error-banner" role="alert">{error}</div>}
+        {loading && session.modules.length === 0 && (
+          <Working title="Drafting the module breakdown…" text="Splitting the concept into buildable modules." />
+        )}
+        {session.modules.length > 0 && (
+          <ul className="module-grid">
+            {session.modules.map((m, i) => {
+              const core = m.startsWith("Platform-Core");
+              return (
+                <li key={i} className={"module-tile" + (core ? " core" : "")}>
+                  <span className="module-icon" aria-hidden="true">{core ? <Link2 size={16} /> : <Boxes size={16} />}</span>
+                  <span className="module-name">{m}</span>
+                  {core && <span className="chip">Shared contract</span>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="stage-card">
-      <h2>Generating BRD/PRD…</h2>
-      {error && <div className="error-banner">{error}</div>}
-      {loading && <div className="stage-hint">Drafting requirements for each module — this calls the commercial model tier per the routing policy.</div>}
-      <ul className="module-list">
-        {generated.map((r) => (
-          <li key={r.req_id}>
-            <strong>{r.req_id}</strong> — {r.title}
-          </li>
-        ))}
-      </ul>
+    <div className="generating">
+      {error && <div className="error-banner" role="alert">{error}</div>}
+      {loading && (
+        <Working title="Drafting requirements for each module…" text="This uses the commercial model tier per the routing policy, so it can take a minute or two." />
+      )}
+      {generated.length > 0 && (
+        <ul className="module-grid">
+          {generated.map((r) => (
+            <li key={r.req_id} className="module-tile">
+              <span className="req-id">{r.req_id}</span>
+              <span className="module-name">{r.title}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
