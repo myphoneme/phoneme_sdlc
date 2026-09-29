@@ -20,6 +20,7 @@ const get = (path) => call(path);
 
 export const api = {
   startSession: (initial_message) => post("/discovery/start", { initial_message }),
+  getSession: (session_id) => get(`/discovery/${session_id}`),
   chat: (session_id, message) => post("/discovery/chat", { session_id, message }),
   research: (session_id) => post("/discovery/research", { session_id, message: "" }),
   researchMore: (session_id, query) => post("/discovery/research/more", { session_id, query }),
