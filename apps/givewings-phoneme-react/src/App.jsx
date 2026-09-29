@@ -291,10 +291,7 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
   return (
     <div className="wizard-shell">
       <header className="app-header">
-        <div className="logo-wordmark">
-          <span className="logo-phon">PHON</span>
-          <span className="logo-eme">EME</span>
-        </div>
+        <a className="wordmark" href="#home" aria-label="GiveWings home"><span className="wing-mark"><Zap size={20} fill="currentColor" /></span><span>GiveWings</span></a>
         <div className="header-title">SDLC Platform — Idea to BRD/PRD</div>
         <button type="button" className="btn-secondary" onClick={onBack}>← Back to dashboard</button>
       </header>
