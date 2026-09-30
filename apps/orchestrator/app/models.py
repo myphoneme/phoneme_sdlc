@@ -189,13 +189,44 @@ class GenerateRequest(BaseModel):
     session_id: str
 
 
+class JourneyStep(BaseModel):
+    title: str
+    detail: str = ""
+    actor: str = ""
+
+
+class AcceptanceCriterion(BaseModel):
+    id: str = ""
+    criterion: str
+    priority: str = "Must"  # Must | Should | Could
+
+
+class RequirementDoc(BaseModel):
+    """Structured, stakeholder-readable requirement (2026-09-30 review:
+    prose paragraphs laced with API paths and table names were unreadable
+    and pre-empted Technical Design). Business language only -- the
+    technical mapping (services, endpoints, data model) is produced later,
+    in the Technical Design stage, from this frozen document."""
+    summary: str = ""
+    actors: list[str] = []
+    journey: list[JourneyStep] = []
+    business_rules: list[str] = []
+    acceptance_criteria: list[AcceptanceCriterion] = []
+    out_of_scope: list[str] = []
+    open_questions: list[str] = []
+
+
 class Requirement(BaseModel):
     req_id: str
     module: str
     title: str
-    body: str
+    body: str  # plain-text rendering of `doc` (legacy/fallback + AI context)
     status: str = "Draft"  # Draft -> Review -> Approved -> Frozen
     revised_body: Optional[str] = None
+    doc: Optional[RequirementDoc] = None
+    revised_doc: Optional[RequirementDoc] = None
+    revised_title: Optional[str] = None
+    status_before_revision: Optional[str] = None
 
 
 class CommentRequest(BaseModel):

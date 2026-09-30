@@ -1,4 +1,5 @@
 import { Boxes, Link2, Sparkles } from "lucide-react";
+import { FlowStepText } from "./RequirementDoc.jsx";
 import { ResearchReportView } from "./ResearchCard.jsx";
 import { IdentitySummary } from "./IdentityStudio.jsx";
 import { GenerationBoard } from "./Generating.jsx";
@@ -104,7 +105,7 @@ function FlowReview({ session }) {
             <span className="req-count">{f.steps.length} steps</span>
             <span className={f.status === "Approved" ? "chip good" : "chip"}>{f.status}</span>
           </div>
-          <ol className="flow-step-list">{f.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
+          <ol className="flow-step-list">{f.steps.map((s, i) => <li key={i}><FlowStepText text={s} /></li>)}</ol>
         </div>
       ))}
     </div>

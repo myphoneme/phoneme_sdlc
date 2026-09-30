@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, PenLine, Plus, Trash2 } from "lucide-react";
 import { api } from "../api.js";
+import { FlowStepText } from "./RequirementDoc.jsx";
 
 function statusClass(status) {
   if (status === "Approved") return "chip good";
@@ -91,7 +92,7 @@ function FlowCard({ sessionId, flow, onChange }) {
         />
       ) : (
         <ol className="flow-step-list">
-          {flow.steps.map((s, i) => <li key={i}>{s}</li>)}
+          {flow.steps.map((s, i) => <li key={i}><FlowStepText text={s} /></li>)}
         </ol>
       )}
 
@@ -99,7 +100,7 @@ function FlowCard({ sessionId, flow, onChange }) {
         <div className="diff-block">
           <div className="diff-label">Proposed revision</div>
           <ol className="flow-step-list flow-step-list-new">
-            {flow.revised_steps.map((s, i) => <li key={i}>{s}</li>)}
+            {flow.revised_steps.map((s, i) => <li key={i}><FlowStepText text={s} /></li>)}
           </ol>
           <div className="requirement-actions">
             <button className="btn-secondary" disabled={busy} onClick={() => act(() => api.discardFlow(sessionId, flow.module))}>Discard</button>

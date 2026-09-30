@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 
-from .. import ai_router, store
+from .. import ai_router, reqdoc, store
 from ..locks import session_lock
 from ..models import (
     FlowCommentRequest,
@@ -215,18 +215,20 @@ async def _generate_flows(state: SessionState) -> SessionState:
             f"Module: {module}{research_context}\n\n"
             "Write the key sequence flow for this module: the numbered, "
             "step-by-step path from a user's action through to the "
-            "system's response, interleaving frontend (what the user sees "
-            "/ does) and backend (what the service, worker, or pipeline "
-            "does) steps in the order they actually happen. Be concrete "
-            "and specific to this module and concept -- name the actual "
-            "screens, API calls, data written, and decisions made at each "
-            "step, not generic CRUD language. One step per line, numbered "
-            "'1.', '2.', etc. 5-10 steps. No headers, no descriptions "
-            "outside the numbered list.",
+            "outcome, in the order it actually happens. Start every step "
+            "with who does it, then a colon -- e.g. 'User: forwards a link "
+            "to the RelayReel WhatsApp number' or 'RelayReel: saves it to "
+            "the user's private vault'. Be concrete and specific to this "
+            "module and concept (name the screens and decisions), but in "
+            "business language -- no API endpoints, paths, HTTP methods, "
+            "table/queue/field names or code identifiers; those are "
+            "decided later in Technical Design. One step per line, "
+            "numbered '1.', '2.', etc. 5-10 steps. No headers.",
             system="You are the flow-design step of the Idea-to-BRD/PRD "
             "Wizard, run before BRD/PRD drafting so the requirement text "
             "that follows is grounded in a concrete, agreed mechanism "
-            "rather than an abstract description. Plain text only.",
+            "rather than an abstract description. Plain text only, "
+            "business language.",
         )
         steps = [
             _strip_markdown(re.sub(r"^\d+[\.\)]\s*", "", l.strip()))
@@ -264,8 +266,9 @@ async def comment_flow(req: FlowCommentRequest):
         f"Reviewer comment: {req.comment}\n\n"
         "Rewrite the full numbered sequence flow to address the comment. "
         "Keep steps that are still correct; revise or add steps as the "
-        "comment requires. Return only the revised numbered list, one step "
-        "per line.",
+        "comment requires. Keep the 'Who: what happens' form and business "
+        "language (no endpoints, table or field names). Return only the "
+        "revised numbered list, one step per line.",
         system="You are the flow-design step's regenerate-from-comments "
         "step. Plain text only -- no markdown bold/italics, no headers.",
     )
@@ -460,34 +463,28 @@ async def retry_generation(req: SessionRequest):
 async def _draft_requirement(state: SessionState, module: str, req_id: str) -> Requirement:
     flow = next((f for f in state.module_flows if f.module == module), None)
     spec = next((m for m in state.module_specs if m.name == module or f"Platform-Core: {m.name}" == module), None)
-    flow_context = ""
-    if flow and flow.steps:
-        flow_context = (
-            "\n\nThis module's key sequence flow was already reviewed "
-            "and approved -- draft the requirement to match this "
-            "mechanism exactly rather than describing the module in the "
-            "abstract:\n" + "\n".join(f"{i+1}. {s}" for i, s in enumerate(flow.steps))
-        )
+    ctx = ""
     if spec and spec.description:
-        flow_context = f"\nModule responsibility: {spec.description}" + flow_context
-    result = await ai_router.generate(
-        ai_router.Feature.BRD_PRD_DRAFTING,
-        f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n"
-        f"Module: {module}{flow_context}\n\n"
-        "Draft the BRD/PRD requirement for this module: a short title "
-        "line, then 3-5 sentences covering description, actors, and "
-        "acceptance criteria. If a sequence flow is given above, the "
-        "acceptance criteria must reflect its actual steps and "
-        "decisions, not generic language that would fit any module.",
-        system="You are the BRD/PRD generation step of the Idea-to-BRD/PRD Wizard. "
-        "Plain text only -- no markdown bold/italics, no headers.",
+        ctx += f"\nModule responsibility: {spec.description}"
+    if flow and flow.steps:
+        ctx += (
+            "\n\nThis module's key sequence flow was reviewed and approved "
+            "by the business -- the journey and acceptance criteria must "
+            "follow it exactly (restate it in business language if any "
+            "step is technical):\n" + "\n".join(f"{i+1}. {s}" for i, s in enumerate(flow.steps))
+        )
+    if _is_platform_core(module):
+        ctx += (
+            "\n\nThis is a Platform-Core module provided by the shared "
+            "platform. Describe only what this product needs from it "
+            "(who signs in, what they may access), not how it is built."
+        )
+    title, doc = await reqdoc.generate_doc(
+        f"Product: {state.selected_name}\nConcept: {state.concept_summary}\nModule: {module}{ctx}\n\n"
+        "Write the BRD/PRD requirement for this module.",
+        fallback_title=module,
     )
-    text = result["text"].strip()
-    title, _, rest = text.partition("\n")
     return Requirement(
-        req_id=req_id,
-        module=module,
-        title=_strip_markdown(title.strip()) or module,
-        body=_strip_markdown(rest.strip()) or _strip_markdown(text),
-        status="Draft",
+        req_id=req_id, module=module, title=title, body=reqdoc.render_text(title, doc),
+        status="Draft", doc=doc,
     )

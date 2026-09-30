@@ -60,5 +60,6 @@ export const api = {
   comment: (session_id, req_id, comment) => post(`/brdprd/${session_id}/comment`, { req_id, comment }),
   accept: (session_id, req_id) => post(`/brdprd/${session_id}/accept`, { req_id }),
   discard: (session_id, req_id) => post(`/brdprd/${session_id}/discard`, { req_id }),
+  restructure: (session_id, req_id) => post(`/brdprd/${session_id}/restructure/${req_id}`, {}),
   freezeRequirement: (session_id, req_id) => post(`/brdprd/${session_id}/freeze/${req_id}`, {}),
 };

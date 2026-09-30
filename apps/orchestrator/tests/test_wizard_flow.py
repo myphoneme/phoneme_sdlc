@@ -31,11 +31,19 @@ async def fake(feature, prompt, system=None):
     if f == ai_router.Feature.TECH_DESIGN_GENERATION:
         return {"text": "1. User forwards\n2. Webhook stores\n3. UI shows"}
     if f == ai_router.Feature.BRD_PRD_DRAFTING:
-        await asyncio.sleep(0.2)
-        if "Catalogue" in prompt and fail_once["on"]:
+        await asyncio.sleep(0.05)
+        if "Catalogue" in prompt and "Module: Genre" in prompt and fail_once["on"]:
             fail_once["on"] = False
             raise RuntimeError("provider timeout")
-        return {"text": "Title line\nBody sentence one. Body two."}
+        leaky = "contains implementation detail" not in prompt and "Module: Ingestion Vault" in prompt and "Current requirement" not in prompt
+        doc = {"title": "Capture forwarded content", "summary": "Users forward links and they land in a private vault.",
+               "actors": ["Content creator", "RelayReel (system)"],
+               "journey": [{"title": "Forward a link", "detail": "The creator forwards a link on WhatsApp.", "actor": "Content creator"},
+                           {"title": "Save privately", "detail": ("The gateway calls POST /ingestion/intake and writes vault_raw_messages." if leaky else "RelayReel saves it to the private vault."), "actor": "RelayReel (system)"}],
+               "business_rules": ["Items are private by default."],
+               "acceptance_criteria": [{"criterion": "Given a forwarded link, when it arrives, then it appears in the vault within a minute.", "priority": "must"}, {"criterion": "", "priority": "x"}, {"criterion": "Given a duplicate, then it is merged.", "priority": "Should"}],
+               "out_of_scope": [], "open_questions": []}
+        return {"text": json.dumps(doc)}
     return {"text": "ok"}
 fail_once = {"on": True}
 ai_router.generate = fake
@@ -111,5 +119,27 @@ async def run():
         print("after retry:", g["status"], g["done"], "/", g["total"], "stage", s["stage"], "reqs", [r["req_id"] for r in reqs])
         assert g["status"] == "done" and s["stage"] == "manager" and len(reqs) == 4
         print("drafting calls:", calls.count("brd_prd_drafting"))
+        r1 = next(r for r in reqs if r["module"] == "Ingestion Vault")
+        txt = r1["body"]
+        assert "/ingestion" not in txt and "vault_raw" not in txt, txt
+        assert r1["doc"]["journey"][1]["detail"] == "RelayReel saves it to the private vault."
+        acs = r1["doc"]["acceptance_criteria"]
+        assert [a["id"] for a in acs] == ["AC1", "AC2"] and acs[0]["priority"] == "Must", acs
+        print("structured doc OK; body:\n" + txt)
+        # legacy prose requirement -> restructure proposal -> discard restores status
+        from app import store
+        from app.models import Requirement
+        legacy = Requirement(req_id="RELA-900", module="Ingestion Vault", title="Old prose", body="Users must POST /x ...", status="Approved")
+        await store.add_requirement(sid, legacy)
+        rr = await post(f"/api/brdprd/{sid}/restructure/RELA-900", {})
+        assert rr["revised_doc"] and rr["status"].startswith("Revised"), rr
+        await post(f"/api/brdprd/{sid}/freeze/RELA-900", {}, 400)
+        rr = await post(f"/api/brdprd/{sid}/discard", {"req_id": "RELA-900"})
+        assert rr["status"] == "Approved" and rr["doc"] is None, rr
+        rr = await post(f"/api/brdprd/{sid}/restructure/RELA-900", {})
+        rr = await post(f"/api/brdprd/{sid}/accept", {"req_id": "RELA-900"})
+        assert rr["doc"]["summary"] and rr["title"] == "Capture forwarded content" and rr["status"] == "Approved", rr
+        rr = await post(f"/api/brdprd/{sid}/comment", {"req_id": "RELA-900", "comment": "mention duplicates"})
+        assert rr["revised_doc"], rr
         print("ALL OK")
 asyncio.run(run())
