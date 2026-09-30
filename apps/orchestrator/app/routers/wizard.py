@@ -2,21 +2,34 @@
 Stage 2 tail (Freeze Summary / Module Breakdown) and Stage 3 (Generating
 BRD/PRD) endpoints.
 """
+import asyncio
+import json
+import logging
 import re
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 
 from .. import ai_router, store
+from ..locks import session_lock
 from ..models import (
     FlowCommentRequest,
     FlowFreezeRequest,
     FlowModuleRequest,
+    FlowStepsUpdateRequest,
     FreezeRequest,
     GenerateRequest,
+    GenerationItem,
+    GenerationProgress,
     ModuleFlow,
+    ModuleSpec,
+    ModulesSaveRequest,
     Requirement,
+    SessionRequest,
     SessionState,
 )
+
+logger = logging.getLogger("phoneme.wizard")
 
 router = APIRouter(prefix="/api/wizard", tags=["wizard"])
 
@@ -62,37 +75,111 @@ def _research_context(state: SessionState) -> str:
     return ctx
 
 
+def _extract_json(text: str) -> dict:
+    text = re.sub(r"^```(?:json)?\s*", "", text.strip())
+    text = re.sub(r"```\s*$", "", text)
+    a, b = text.find("{"), text.rfind("}")
+    if a == -1 or b < a:
+        raise ValueError("no JSON object")
+    return json.loads(text[a:b + 1])
+
+
+def _sync_module_names(state: SessionState) -> None:
+    state.modules = [
+        (f"Platform-Core: {m.name}" if m.platform_core and not m.name.lower().startswith("platform-core") else m.name)
+        for m in state.module_specs
+    ]
+
+
 @router.post("/freeze", response_model=SessionState)
 async def freeze_scope(req: FreezeRequest):
-    """Module-breakdown drafting that freezes scope — critical tier."""
+    """Draft the module breakdown -- critical tier. 2026-09-30: this used to
+    jump straight to Flow Design, so the user never saw or agreed the
+    module list. It now stops on the Freeze Scope screen, where modules can
+    be renamed, described, added, removed and reordered before confirming."""
+    async with session_lock(req.session_id, "freeze"):
+        state = await store.get_session(req.session_id)
+        if not state:
+            raise HTTPException(404, "session not found")
+        if state.module_specs:
+            return state
+        if state.modules:  # sessions frozen before module_specs existed
+            state.module_specs = [
+                ModuleSpec(name=m, platform_core=_is_platform_core(m)) for m in state.modules
+            ]
+            await store.save_session(state)
+            return state
+
+        research_context = _research_context(state)
+        result = await ai_router.generate(
+            ai_router.Feature.MODULE_BREAKDOWN,
+            f"Product: {state.selected_name}\nConcept: {state.concept_summary}"
+            f"{research_context}\n\n"
+            "Break this product down into 5-9 functional modules for a BRD/PRD, "
+            "in the order they would be built. Authentication, security and "
+            "API-gateway concerns are provided by Platform-Core (BRD/PRD "
+            "Section 18.6): include them as modules with platform_core true "
+            "rather than drafting them as new modules. Respond with ONLY "
+            'JSON: {"modules": [{"name": "short module name", "description": '
+            '"one sentence on what this module is responsible for", '
+            '"platform_core": false}]}',
+            system="You are the module-breakdown step of the Idea-to-BRD/PRD Wizard. JSON only.",
+        )
+        specs: list[ModuleSpec] = []
+        try:
+            data = _extract_json(result["text"])
+            for m in data.get("modules", []):
+                if isinstance(m, dict) and str(m.get("name", "")).strip():
+                    name = _strip_markdown(str(m["name"]).strip())
+                    core = bool(m.get("platform_core")) or _is_platform_core(name)
+                    name = re.sub(r"^platform-core:\s*", "", name, flags=re.I)
+                    specs.append(ModuleSpec(name=name, description=_strip_markdown(str(m.get("description", ""))), platform_core=core))
+        except (ValueError, json.JSONDecodeError):
+            for l in result["text"].splitlines():
+                l = _strip_markdown(l.strip("-• ").strip())
+                if l:
+                    core = _is_platform_core(l)
+                    specs.append(ModuleSpec(name=re.sub(r"^platform-core:\s*", "", l, flags=re.I), platform_core=core))
+        state.module_specs = specs
+        _sync_module_names(state)
+        await store.save_session(state)
+        return state
+
+
+@router.post("/modules/save", response_model=SessionState)
+async def save_modules(req: ModulesSaveRequest):
     state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
-
-    research_context = _research_context(state)
-
-    result = await ai_router.generate(
-        ai_router.Feature.MODULE_BREAKDOWN,
-        f"Product: {state.selected_name}\nConcept: {state.concept_summary}"
-        f"{research_context}\n\n"
-        "Break this product down into 4-8 functional modules for a BRD/PRD. "
-        "One module name per line, no numbering, no descriptions. Recognize "
-        "authentication/security/API-gateway concerns and label them "
-        "'Platform-Core: <concern>' instead of drafting them as new modules "
-        "(per BRD/PRD Section 18.6 — these are provided by platform-core, "
-        "not built per project).",
-        system="You are the module-breakdown step of the Idea-to-BRD/PRD Wizard.",
-    )
-    modules = [_strip_markdown(l.strip("-• ").strip()) for l in result["text"].splitlines() if l.strip()]
-    state.modules = modules
-    # Stop at the flow-design gate rather than cascading straight into
-    # BRD/PRD drafting -- per the 2026-09-28 design review, generating
-    # requirements before anyone has agreed on *how* each module actually
-    # works (which channel, which data flow, which decisions are auto vs.
-    # user-confirmed) is exactly what produced BRD/PRD content too abstract
-    # for a coding agent to build from without re-iterating.
-    state.stage = "flow"
+    if state.stage != "freeze":
+        raise HTTPException(409, "scope is already frozen")
+    cleaned = [
+        ModuleSpec(name=m.name.strip(), description=m.description.strip(), platform_core=m.platform_core)
+        for m in req.modules if m.name.strip()
+    ]
+    names = [m.name.lower() for m in cleaned]
+    if len(names) != len(set(names)):
+        raise HTTPException(400, "module names must be unique")
+    state.module_specs = cleaned
+    _sync_module_names(state)
     await store.save_session(state)
+    return state
+
+
+@router.post("/modules/confirm", response_model=SessionState)
+async def confirm_modules(req: SessionRequest):
+    """User signed off the module list -- freeze scope and open Flow Design."""
+    state = await store.get_session(req.session_id)
+    if not state:
+        raise HTTPException(404, "session not found")
+    if not [m for m in state.module_specs if not m.platform_core]:
+        raise HTTPException(400, "add at least one product module before freezing scope")
+    if state.stage == "freeze":
+        _sync_module_names(state)
+        keep = set(state.modules)
+        state.module_flows = [f for f in state.module_flows if f.module in keep]
+        state.stage = "flow"
+        await store.save_session(state)
     return state
 
 
@@ -106,12 +193,16 @@ async def generate_flows(req: FreezeRequest):
     -- frontend + backend steps interleaved, the same shape as a manual
     tech-design pass, so the human-in-the-loop review has something concrete
     to react to rather than a bare module name."""
-    state = await store.get_session(req.session_id)
-    if not state:
-        raise HTTPException(404, "session not found")
-    if not state.modules:
-        raise HTTPException(400, "scope not frozen yet — call /api/wizard/freeze first")
+    async with session_lock(req.session_id, "flows"):
+        state = await store.get_session(req.session_id)
+        if not state:
+            raise HTTPException(404, "session not found")
+        if not state.modules:
+            raise HTTPException(400, "scope not frozen yet — call /api/wizard/freeze first")
+        return await _generate_flows(state)
 
+
+async def _generate_flows(state: SessionState) -> SessionState:
     research_context = _research_context(state)
     existing = {f.module for f in state.module_flows}
 
@@ -142,9 +233,14 @@ async def generate_flows(req: FreezeRequest):
             for l in result["text"].splitlines()
             if l.strip()
         ]
-        state.module_flows.append(ModuleFlow(module=module, steps=steps, status="Draft"))
+        # Merge into a fresh copy so approvals/edits the user made on
+        # already-drafted flows while this batch runs are never overwritten.
+        fresh = await store.get_session(state.session_id) or state
+        if all(f.module != module for f in fresh.module_flows):
+            fresh.module_flows.append(ModuleFlow(module=module, steps=steps, status="Draft"))
+        await store.save_session(fresh)
+        state = fresh
 
-    await store.save_session(state)
     return state
 
 
@@ -214,6 +310,28 @@ async def discard_flow(req: FlowModuleRequest):
     return state
 
 
+@router.post("/flows/update", response_model=SessionState)
+async def update_flow_steps(req: FlowStepsUpdateRequest):
+    """Direct editing of a flow (2026-09-30): the user rewrites, reorders,
+    inserts or deletes individual steps instead of only commenting and
+    waiting for an AI rewrite. An edited flow goes back to Draft so it is
+    re-approved consciously."""
+    state = await store.get_session(req.session_id)
+    if not state:
+        raise HTTPException(404, "session not found")
+    flow = next((f for f in state.module_flows if f.module == req.module), None)
+    if not flow:
+        raise HTTPException(404, "flow not found for module")
+    steps = [s.strip() for s in req.steps if s and s.strip()]
+    if not steps:
+        raise HTTPException(400, "a flow needs at least one step")
+    flow.steps = steps
+    flow.revised_steps = None
+    flow.status = "Draft"
+    await store.save_session(state)
+    return state
+
+
 @router.post("/flows/freeze", response_model=SessionState)
 async def freeze_flows(req: FlowFreezeRequest):
     """The gate itself: only once every non-Platform-Core module's flow is
@@ -234,51 +352,142 @@ async def freeze_flows(req: FlowFreezeRequest):
     return state
 
 
-@router.post("/generate", response_model=list[Requirement])
+_running_tasks: set[asyncio.Task] = set()
+STALE_AFTER = timedelta(minutes=10)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _is_stale(g: GenerationProgress) -> bool:
+    if not g.updated_at:
+        return True
+    try:
+        return datetime.now(timezone.utc) - datetime.fromisoformat(g.updated_at) > STALE_AFTER
+    except ValueError:
+        return True
+
+
+@router.post("/generate", response_model=SessionState)
 async def generate_brd_prd(req: GenerateRequest):
-    """BRD/PRD requirement drafting and generation — critical tier."""
+    """Start (or resume) BRD/PRD drafting -- critical tier.
+
+    2026-09-30: this used to be one blocking call that drafted every module
+    before answering, so the browser showed "in progress" with no numbers
+    and could lose the response entirely. It now returns immediately and
+    drafts in the background, recording per-document progress on the
+    session (generation.items) that the UI polls. Already-drafted modules
+    are skipped, so a restart resumes rather than starting over, and a
+    second tab can never start a second run."""
+    async with session_lock(req.session_id, "generate"):
+        state = await store.get_session(req.session_id)
+        if not state:
+            raise HTTPException(404, "session not found")
+        if not state.modules:
+            raise HTTPException(400, "scope not frozen yet — call /api/wizard/freeze first")
+        g = state.generation
+        if g.status == "running" and not _is_stale(g):
+            return state
+        if g.status == "done":
+            return state
+
+        existing = {r.module: r for r in await store.list_requirements(state.session_id)}
+        items = []
+        for i, module in enumerate(state.modules, start=1):
+            req_id = f"{(state.selected_name or 'PROD')[:4].upper()}-{i:03d}"
+            if module in existing:
+                items.append(GenerationItem(module=module, req_id=existing[module].req_id, status="done"))
+            else:
+                items.append(GenerationItem(module=module, req_id=req_id, status="queued"))
+        state.generation = GenerationProgress(
+            status="running", total=len(items), done=sum(1 for it in items if it.status == "done"),
+            items=items, started_at=_now(), updated_at=_now(),
+        )
+        state.stage = "generating"
+        await store.save_session(state)
+
+        task = asyncio.create_task(_run_generation(state.session_id))
+        _running_tasks.add(task)
+        task.add_done_callback(_running_tasks.discard)
+        return state
+
+
+async def _run_generation(session_id: str) -> None:
+    state = await store.get_session(session_id)
+    if not state:
+        return
+    for item in state.generation.items:
+        if item.status == "done":
+            continue
+        item.status = "drafting"
+        state.generation.updated_at = _now()
+        await store.save_session(state)
+        try:
+            r = await _draft_requirement(state, item.module, item.req_id)
+            await store.add_requirement(session_id, r)
+            item.status = "done"
+            state.generation.done += 1
+        except Exception as exc:
+            logger.exception("BRD/PRD drafting failed for %s / %s", session_id, item.module)
+            item.status = "failed"
+            item.error = f"{type(exc).__name__}: {str(exc)[:200]}"
+        state.generation.updated_at = _now()
+        await store.save_session(state)
+
+    failed = [it for it in state.generation.items if it.status == "failed"]
+    state.generation.status = "failed" if failed else "done"
+    state.generation.updated_at = _now()
+    if not failed:
+        state.stage = "manager"
+    await store.save_session(state)
+
+
+@router.post("/generate/retry", response_model=SessionState)
+async def retry_generation(req: SessionRequest):
+    """Re-queue failed documents only."""
     state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
-    if not state.modules:
-        raise HTTPException(400, "scope not frozen yet — call /api/wizard/freeze first")
-
-    generated: list[Requirement] = []
-    for i, module in enumerate(state.modules, start=1):
-        flow = next((f for f in state.module_flows if f.module == module), None)
-        flow_context = ""
-        if flow and flow.steps:
-            flow_context = (
-                "\n\nThis module's key sequence flow was already reviewed "
-                "and approved -- draft the requirement to match this "
-                "mechanism exactly rather than describing the module in the "
-                "abstract:\n" + "\n".join(f"{i+1}. {s}" for i, s in enumerate(flow.steps))
-            )
-        result = await ai_router.generate(
-            ai_router.Feature.BRD_PRD_DRAFTING,
-            f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n"
-            f"Module: {module}{flow_context}\n\n"
-            "Draft the BRD/PRD requirement for this module: a short title "
-            "line, then 3-5 sentences covering description, actors, and "
-            "acceptance criteria. If a sequence flow is given above, the "
-            "acceptance criteria must reflect its actual steps and "
-            "decisions, not generic language that would fit any module.",
-            system="You are the BRD/PRD generation step of the Idea-to-BRD/PRD Wizard. "
-            "Plain text only -- no markdown bold/italics, no headers.",
-        )
-        text = result["text"].strip()
-        title, _, rest = text.partition("\n")
-        req_id = f"{(state.selected_name or 'PROD')[:4].upper()}-{i:03d}"
-        r = Requirement(
-            req_id=req_id,
-            module=module,
-            title=_strip_markdown(title.strip()) or module,
-            body=_strip_markdown(rest.strip()) or _strip_markdown(text),
-            status="Draft",
-        )
-        await store.add_requirement(state.session_id, r)
-        generated.append(r)
-
-    state.stage = "manager"
+    for it in state.generation.items:
+        if it.status == "failed":
+            it.status, it.error = "queued", ""
+    state.generation.status = "idle"
     await store.save_session(state)
-    return generated
+    return await generate_brd_prd(GenerateRequest(session_id=req.session_id))
+
+
+async def _draft_requirement(state: SessionState, module: str, req_id: str) -> Requirement:
+    flow = next((f for f in state.module_flows if f.module == module), None)
+    spec = next((m for m in state.module_specs if m.name == module or f"Platform-Core: {m.name}" == module), None)
+    flow_context = ""
+    if flow and flow.steps:
+        flow_context = (
+            "\n\nThis module's key sequence flow was already reviewed "
+            "and approved -- draft the requirement to match this "
+            "mechanism exactly rather than describing the module in the "
+            "abstract:\n" + "\n".join(f"{i+1}. {s}" for i, s in enumerate(flow.steps))
+        )
+    if spec and spec.description:
+        flow_context = f"\nModule responsibility: {spec.description}" + flow_context
+    result = await ai_router.generate(
+        ai_router.Feature.BRD_PRD_DRAFTING,
+        f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n"
+        f"Module: {module}{flow_context}\n\n"
+        "Draft the BRD/PRD requirement for this module: a short title "
+        "line, then 3-5 sentences covering description, actors, and "
+        "acceptance criteria. If a sequence flow is given above, the "
+        "acceptance criteria must reflect its actual steps and "
+        "decisions, not generic language that would fit any module.",
+        system="You are the BRD/PRD generation step of the Idea-to-BRD/PRD Wizard. "
+        "Plain text only -- no markdown bold/italics, no headers.",
+    )
+    text = result["text"].strip()
+    title, _, rest = text.partition("\n")
+    return Requirement(
+        req_id=req_id,
+        module=module,
+        title=_strip_markdown(title.strip()) or module,
+        body=_strip_markdown(rest.strip()) or _strip_markdown(text),
+        status="Draft",
+    )

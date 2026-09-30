@@ -1,8 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Eye } from 'lucide-react';
 import { ArrowRight, ArrowUpRight, Bell, Check, ChevronDown, ChevronRight, CircleHelp, Command, FileText, Layers3, Lightbulb, Menu, MessageCircle, MoreHorizontal, Plus, Rocket, Search, Sparkles, UsersRound, WandSparkles, X, Zap, BarChart3, ClipboardCheck, Target, PenLine } from 'lucide-react';
 import DiscoveryChat from './stages/DiscoveryChat.jsx';
 import ResearchCard from './stages/ResearchCard.jsx';
-import IdentityTheme from './stages/IdentityTheme.jsx';
+import IdentityStudio from './stages/IdentityStudio.jsx';
+import ConceptConfirm from './stages/ConceptConfirm.jsx';
+import ScopeFreeze from './stages/ScopeFreeze.jsx';
+import StageReview from './stages/StageReview.jsx';
 import Generating from './stages/Generating.jsx';
 import ModuleFlowReview from './stages/ModuleFlowReview.jsx';
 import BrdPrdManager from './stages/BrdPrdManager.jsx';
@@ -13,7 +17,9 @@ import { api } from './api.js';
 // ['Idea','Plan','Build','Launch'] taxonomy. Every place that used to render
 // 4 stages now adapts to these 7.
 const STAGES = ['discovery', 'research', 'identity', 'freeze', 'flow', 'generating', 'manager'];
-const STAGE_LABELS = ['Discovery Chat', 'Research', 'Identity & Theme', 'Freeze Scope', 'Flow Design', 'Generating', 'BRD/PRD Manager'];
+const STAGE_LABELS = ['Discovery Chat', 'Research', 'Identity', 'Freeze Scope', 'Flow Design', 'Drafting BRD/PRD', 'BRD/PRD Manager'];
+// 'confirm' (reviewing the concept brief) is the tail of Discovery on the journey.
+const journeyStage = stage => (stage === 'confirm' ? 'discovery' : stage);
 
 // The backend persists sessions durably; a browser refresh has no way to
 // know which session_id to resume unless we remember it ourselves. Only the
@@ -36,10 +42,10 @@ const aiActions = [
 const STAGE_META = {
   discovery: { icon: MessageCircle, title: 'Discovery Chat', short: 'Shape the concept', desc: 'Describe your idea in plain words. GiveWings AI reflects it back and asks clarifying questions until the scope is clear enough to research.' },
   research: { icon: Search, title: 'Market Research', short: 'Competitors & viability', desc: 'Live, web-grounded research: who already plays in this space, whether it can make money, what to build first — then pick a product name.' },
-  identity: { icon: WandSparkles, title: 'Identity & Theme', short: 'Name & visual theme', desc: 'Choose the visual theme the product will carry through its documents and screens.' },
-  freeze: { icon: Target, title: 'Freeze Scope', short: 'Lock the module list', desc: 'The concept is broken into modules. Shared Platform-Core modules link to the common contract instead of being drafted again.' },
-  flow: { icon: Layers3, title: 'Flow Design', short: 'How each module works', desc: 'Pin down the step-by-step sequence for every module. Comment to redirect a flow, approve it when it is right.' },
-  generating: { icon: Sparkles, title: 'Drafting BRD/PRD', short: 'AI writes requirements', desc: 'GiveWings AI drafts the requirements for each approved module.' },
+  identity: { icon: WandSparkles, title: 'Identity', short: 'Name, domain, logo, colours', desc: 'Lock the brand: pick the name with real domain availability, choose a tagline, build the colour theme, then pick a logo drawn in that theme.' },
+  freeze: { icon: Target, title: 'Freeze Scope', short: 'Agree the module list', desc: 'GiveWings AI breaks the product into modules. Rename, describe, add, remove or reorder them — flows are designed only for the modules you freeze here.' },
+  flow: { icon: Layers3, title: 'Flow Design', short: 'How each module works', desc: 'Pin down the step-by-step sequence for every module. Edit, reorder, add or remove steps yourself, or comment and let AI rework it — then approve.' },
+  generating: { icon: Sparkles, title: 'Drafting BRD/PRD', short: 'AI writes requirements', desc: 'GiveWings AI drafts one requirement document per frozen module. Progress updates live — you can leave and come back.' },
   manager: { icon: FileText, title: 'BRD/PRD Manager', short: 'Review, revise, freeze', desc: 'Review each drafted requirement. Comment to request a revision, accept or discard it, and freeze once approved.' },
 };
 
@@ -110,14 +116,15 @@ function timeAgo(iso) {
 // stage -> the honest status badge (reuses the already-contrast-fixed
 // .status / .status.in-progress / .status.early-stage classes; no fourth
 // variant was needed since 'generating'/'manager' reuse the on-track look).
-function statusFor(stage) {
+function statusFor(rawStage) {
+  const stage = journeyStage(rawStage);
   if (stage === 'discovery') return { label: 'Early stage', cls: 'early-stage' };
   if (stage === 'generating' || stage === 'manager') return { label: 'Ready for BRD/PRD', cls: '' };
   return { label: 'In progress', cls: 'in-progress' };
 }
 
 function ProductCard({ session, onOpen }) {
-  const idx = Math.max(0, STAGES.indexOf(session.stage));
+  const idx = Math.max(0, STAGES.indexOf(journeyStage(session.stage)));
   const label = STAGE_LABELS[idx] || session.stage;
   const progress = Math.round(((idx + 1) / STAGES.length) * 100);
   const status = statusFor(session.stage);
@@ -167,14 +174,14 @@ function Dashboard({ sessions, loading, error, onOpen, onCreate, onRetry }) {
     const matchesFilter =
       filter === 'All' ||
       (filter === 'In progress' && ['research', 'identity', 'freeze', 'flow', 'generating'].includes(s.stage)) ||
-      (filter === 'Early stage' && s.stage === 'discovery');
+      (filter === 'Early stage' && journeyStage(s.stage) === 'discovery');
     return matchesFilter && s.name.toLowerCase().includes(query.toLowerCase());
   }), [sessions, query, filter]);
 
   const visible = showAll ? filtered : filtered.slice(0, 4);
 
   const counts = useMemo(() => ({
-    discovery: sessions.filter(s => s.stage === 'discovery').length,
+    discovery: sessions.filter(s => journeyStage(s.stage) === 'discovery').length,
     inDesign: sessions.filter(s => ['research', 'identity', 'freeze', 'flow'].includes(s.stage)).length,
     readyForBrdPrd: sessions.filter(s => ['generating', 'manager'].includes(s.stage)).length,
   }), [sessions]);
@@ -322,7 +329,7 @@ function workspaceTitle(session) {
   return cut.length > 48 ? cut.slice(0, 46).trimEnd() + '…' : cut;
 }
 
-function JourneyRail({ stageIndex }) {
+function JourneyRail({ stageIndex, viewIndex, onView }) {
   return (
     <aside className="journey" aria-label="Idea journey">
       <div className="journey-head">
@@ -334,20 +341,29 @@ function JourneyRail({ stageIndex }) {
         {STAGES.map((s, i) => {
           const meta = STAGE_META[s];
           const state = i < stageIndex ? 'done' : i === stageIndex ? 'current' : 'todo';
-          return (
-            <li key={s} className={`journey-step ${state}`} aria-current={state === 'current' ? 'step' : undefined}>
+          const reachable = i <= stageIndex;
+          const viewing = i === viewIndex;
+          const inner = (
+            <>
               <span className="journey-dot">{state === 'done' ? <Check size={13} strokeWidth={3} /> : i + 1}</span>
               <span className="journey-copy">
                 <strong>{meta.title}</strong>
-                <small>{state === 'done' ? 'Completed' : state === 'current' ? 'In progress' : meta.short}</small>
+                <small>{viewing && state === 'done' ? 'Viewing' : state === 'done' ? 'Completed · view' : state === 'current' ? 'In progress' : meta.short}</small>
               </span>
+            </>
+          );
+          return (
+            <li key={s} className={`journey-step ${state}${viewing ? ' viewing' : ''}`} aria-current={state === 'current' ? 'step' : undefined}>
+              {reachable ? (
+                <button type="button" className="journey-link" onClick={() => onView(i)} aria-label={`${meta.title}${state === 'done' ? ' (completed) — view' : ''}`}>{inner}</button>
+              ) : <div className="journey-link" aria-disabled="true">{inner}</div>}
             </li>
           );
         })}
       </ol>
       <div className="journey-tip">
         <span className="journey-tip-icon"><Sparkles size={16} /></span>
-        <p>Everything is saved as you go. Close the tab and come back any time — you will resume right here.</p>
+        <p>Everything is saved as you go. Click any completed step to look back at it — you will always return to where you left off.</p>
       </div>
     </aside>
   );
@@ -355,8 +371,14 @@ function JourneyRail({ stageIndex }) {
 
 function WizardView({ session, setSession, requirements, setRequirements, onBack }) {
   const stage = session?.stage || 'discovery';
-  const stageIndex = Math.max(0, STAGES.indexOf(stage));
-  const meta = STAGE_META[stage] || STAGE_META.discovery;
+  const jStage = journeyStage(stage);
+  const stageIndex = Math.max(0, STAGES.indexOf(jStage));
+  const [viewIndex, setViewIndex] = useState(stageIndex);
+  // Follow the live stage forward whenever it advances.
+  useEffect(() => { setViewIndex(stageIndex); }, [stageIndex]);
+  const reviewing = viewIndex < stageIndex;
+  const viewStage = STAGES[viewIndex];
+  const meta = STAGE_META[viewStage] || STAGE_META.discovery;
   const status = statusFor(stage);
   const title = workspaceTitle(session);
   const StageIcon = meta.icon;
@@ -373,13 +395,19 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
           </nav>
           <div className="ws-title-row">
             <div className="ws-title">
-              <span className="ws-mark" aria-hidden="true">{title.charAt(0).toUpperCase()}</span>
+              {!session?.brand?.logo && <span className="ws-mark" aria-hidden="true">{title.charAt(0).toUpperCase()}</span>}
               <div>
-                <h1>{title}</h1>
+                {session?.brand?.logo ? (
+                  <h1 className="ws-logo-title">
+                    <span className="sr-only">{title}</span>
+                    <img className="ws-logo" alt="" aria-hidden="true" src={`data:image/svg+xml;utf8,${encodeURIComponent(session.brand.logo.svg)}`} />
+                  </h1>
+                ) : <h1>{title}</h1>}
                 <div className="ws-meta">
                   <span className={`status ${status.cls}`}><span /> {status.label}</span>
                   <span className="ws-meta-dot" aria-hidden="true">•</span>
-                  <span>Step {stageIndex + 1} of {STAGES.length} · {meta.title}</span>
+                  <span>Step {stageIndex + 1} of {STAGES.length} · {STAGE_META[jStage].title}</span>
+                  {session?.brand?.tagline && <><span className="ws-meta-dot" aria-hidden="true">•</span><em className="ws-tagline">{session.brand.tagline}</em></>}
                 </div>
               </div>
             </div>
@@ -391,31 +419,45 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
       </section>
 
       <div className="ws-body">
-        <JourneyRail stageIndex={stageIndex} />
+        <JourneyRail stageIndex={stageIndex} viewIndex={viewIndex} onView={setViewIndex} />
 
-        <main className="stage-panel" key={stage}>
+        <main className="stage-panel" key={`${viewStage}-${reviewing}`}>
+          {reviewing && (
+            <div className="review-banner" role="status">
+              <Eye size={16} aria-hidden="true" />
+              <span>You are looking back at a completed step — read-only.</span>
+              <button type="button" className="btn-primary" onClick={() => setViewIndex(stageIndex)}>
+                Back to {STAGE_META[jStage].title} <ArrowRight size={15} />
+              </button>
+            </div>
+          )}
           <header className="stage-panel-head">
             <span className="stage-panel-icon" aria-hidden="true"><StageIcon size={22} /></span>
             <div>
-              <span className="stage-eyebrow">Step {stageIndex + 1} · {meta.short}</span>
-              <h2>{meta.title}</h2>
-              <p>{meta.desc}</p>
+              <span className="stage-eyebrow">Step {viewIndex + 1} · {meta.short}{reviewing ? ' · completed' : ''}</span>
+              <h2>{stage === 'confirm' && !reviewing ? 'Confirm your concept' : meta.title}</h2>
+              <p>{stage === 'confirm' && !reviewing ? 'Check every decision GiveWings AI captured. Edit anything that is wrong or missing — research and every document after it are built on this.' : meta.desc}</p>
             </div>
           </header>
           <div className="stage-panel-body">
-        {stage === 'discovery' && <DiscoveryChat session={session} setSession={setSession} />}
-        {stage === 'research' && <ResearchCard session={session} setSession={setSession} />}
-        {stage === 'identity' && <IdentityTheme session={session} setSession={setSession} />}
-        {stage === 'freeze' && (
-          <Generating session={session} setSession={setSession} setRequirements={setRequirements} freezeOnly />
-        )}
-        {stage === 'flow' && <ModuleFlowReview session={session} setSession={setSession} />}
-        {stage === 'generating' && (
-          <Generating session={session} setSession={setSession} setRequirements={setRequirements} />
-        )}
-        {stage === 'manager' && (
-          <BrdPrdManager session={session} requirements={requirements} setRequirements={setRequirements} />
-        )}
+            {reviewing ? (
+              <StageReview stage={viewStage} session={session} requirements={requirements} />
+            ) : (
+              <>
+                {stage === 'discovery' && <DiscoveryChat session={session} setSession={setSession} />}
+                {stage === 'confirm' && <ConceptConfirm session={session} setSession={setSession} />}
+                {stage === 'research' && <ResearchCard session={session} setSession={setSession} />}
+                {stage === 'identity' && <IdentityStudio session={session} setSession={setSession} />}
+                {stage === 'freeze' && <ScopeFreeze session={session} setSession={setSession} />}
+                {stage === 'flow' && <ModuleFlowReview session={session} setSession={setSession} />}
+                {stage === 'generating' && (
+                  <Generating session={session} setSession={setSession} setRequirements={setRequirements} />
+                )}
+                {stage === 'manager' && (
+                  <BrdPrdManager session={session} requirements={requirements} setRequirements={setRequirements} />
+                )}
+              </>
+            )}
           </div>
         </main>
       </div>

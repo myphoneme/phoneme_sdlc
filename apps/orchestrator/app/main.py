@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config, store
-from .routers import discovery, wizard, brdprd
+from .routers import discovery, identity, wizard, brdprd
 
 logging.basicConfig(level=logging.INFO)
 
@@ -40,6 +40,7 @@ app.add_middleware(
 )
 
 app.include_router(discovery.router)
+app.include_router(identity.router)
 app.include_router(wizard.router)
 app.include_router(brdprd.router)
 

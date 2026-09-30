@@ -59,18 +59,101 @@ class ModuleFlow(BaseModel):
     status: str = "Draft"  # Draft -> Revised (pending review) -> Approved
 
 
+class ConceptBrief(BaseModel):
+    """Structured, user-confirmed concept (2026-09-30 dry-run finding: the
+    free-text CONCEPT SUMMARY silently dropped decisions the user had stated
+    -- e.g. RelayReel's private/public choice -- and assumed an audience and
+    market nobody confirmed). Every field is shown to the user and editable
+    before research starts."""
+    summary: str = ""
+    target_users: str = ""
+    core_workflow: str = ""
+    input_channels: str = ""
+    privacy_mode: str = ""
+    market: str = ""
+    platforms: str = ""
+    must_haves: list[str] = []
+    out_of_scope: list[str] = []
+    assumptions: list[str] = []
+
+
+class ModuleSpec(BaseModel):
+    """One module of the frozen scope -- reviewed/edited by the user on the
+    Freeze Scope screen before any flow is drafted."""
+    name: str
+    description: str = ""
+    platform_core: bool = False
+
+
+class DomainCheck(BaseModel):
+    domain: str
+    status: str  # available | taken | unknown
+    method: str = ""  # rdap | dns | error
+
+
+class Palette(BaseModel):
+    name: str = "Custom"
+    mood: str = ""
+    primary: str = "#FF7200"
+    ink: str = "#171717"
+    surface: str = "#FFF7F0"
+    accent: str = "#0F766E"
+    rationale: str = ""
+
+
+class LogoConcept(BaseModel):
+    id: str
+    concept: str = ""
+    svg: str
+
+
+class BrandIdentity(BaseModel):
+    domains: list[DomainCheck] = []
+    domain_checked_name: Optional[str] = None
+    name_notes: str = ""
+    chosen_domain: Optional[str] = None
+    tagline_options: list[str] = []
+    tagline: Optional[str] = None
+    palette_options: list[Palette] = []
+    palette: Optional[Palette] = None
+    logo_options: list[LogoConcept] = []
+    logo: Optional[LogoConcept] = None
+    completed: bool = False
+
+
+class GenerationItem(BaseModel):
+    module: str
+    req_id: str = ""
+    status: str = "queued"  # queued | drafting | done | failed | skipped
+    error: str = ""
+
+
+class GenerationProgress(BaseModel):
+    status: str = "idle"  # idle | running | done | failed
+    total: int = 0
+    done: int = 0
+    items: list[GenerationItem] = []
+    started_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 class SessionState(BaseModel):
     session_id: str
     messages: list[ChatMessage] = []
     concept_summary: Optional[str] = None
+    concept_brief: Optional[ConceptBrief] = None
     companies: list[str] = []  # legacy flat list — kept as a fallback render path
     research: Optional[ResearchReport] = None
     suggested_names: list[str] = []
     selected_name: Optional[str] = None
     selected_theme: Optional[str] = None
-    modules: list[str] = []
+    brand: BrandIdentity = BrandIdentity()
+    modules: list[str] = []  # names only, kept in sync with module_specs for older callers
+    module_specs: list[ModuleSpec] = []
     module_flows: list[ModuleFlow] = []
-    stage: str = "discovery"  # discovery -> research -> identity -> freeze -> flow -> generating -> manager
+    generation: GenerationProgress = GenerationProgress()
+    # discovery -> confirm -> research -> identity -> freeze -> flow -> generating -> manager
+    stage: str = "discovery"
 
 
 class ChatTurnRequest(BaseModel):
@@ -137,3 +220,44 @@ class FlowModuleRequest(BaseModel):
 
 class FlowFreezeRequest(BaseModel):
     session_id: str
+
+
+class SessionRequest(BaseModel):
+    session_id: str
+
+
+class ConfirmBriefRequest(BaseModel):
+    session_id: str
+    brief: ConceptBrief
+
+
+class DomainCheckRequest(BaseModel):
+    session_id: str
+    name: str
+
+
+class ChooseRequest(BaseModel):
+    """Generic 'pick this value' request for the identity sub-steps."""
+    session_id: str
+    value: str
+
+
+class PaletteRequest(BaseModel):
+    session_id: str
+    palette: Palette
+
+
+class LogoChoiceRequest(BaseModel):
+    session_id: str
+    logo_id: str
+
+
+class ModulesSaveRequest(BaseModel):
+    session_id: str
+    modules: list[ModuleSpec]
+
+
+class FlowStepsUpdateRequest(BaseModel):
+    session_id: str
+    module: str
+    steps: list[str]

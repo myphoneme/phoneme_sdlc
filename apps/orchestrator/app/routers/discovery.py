@@ -13,10 +13,12 @@ import re
 from fastapi import APIRouter, HTTPException
 
 from .. import ai_router, store
+from ..locks import session_lock
 from ..models import (
     StartSessionRequest, ChatTurnRequest, ResearchMoreRequest,
     NameCheckRequest, SelectNameRequest, SelectThemeRequest, SessionState,
-    ChatMessage, MarketLandscapeRow, ResearchReport,
+    ChatMessage, MarketLandscapeRow, ResearchReport, ConceptBrief,
+    ConfirmBriefRequest, SessionRequest,
 )
 
 logger = logging.getLogger("phoneme.discovery")
@@ -29,7 +31,23 @@ router = APIRouter(prefix="/api/discovery", tags=["discovery"])
 # open-ended clarifying questions indefinitely (headers, numbered lists,
 # multi-part probes) instead of converging. One user turn from /start plus
 # this many more /chat turns, then the next /chat call is forced to summarize.
-MAX_CLARIFYING_TURNS = 1
+# 2026-09-30 dry run: 1 turn locked RelayReel's concept after a single
+# question -- target users, market and launch platforms were never asked,
+# and the private/public choice the user stated was dropped. Up to 3
+# clarifying turns now, steered by DISCOVERY_CHECKLIST, and the user can end
+# early with "Summarise now" (/summarize). The summary is then shown as an
+# editable ConceptBrief (stage 'confirm') before research spends money.
+MAX_CLARIFYING_TURNS = 3
+
+DISCOVERY_CHECKLIST = (
+    "Across the conversation you need clear answers to: (1) who the target "
+    "users are, (2) how content/data gets into the product (input "
+    "channels), (3) privacy/visibility -- what is private vs. shared or "
+    "public, (4) the launch market and language(s), (5) which platforms "
+    "ship first (web, iOS, Android, WhatsApp, etc.). Ask about the most "
+    "important item that is still unclear. Never re-ask something the user "
+    "already answered."
+)
 
 CHAT_STYLE_RULE = (
     "Reply in plain conversational prose only — 2-4 sentences, no markdown "
@@ -154,7 +172,7 @@ async def start_session(req: StartSessionRequest):
             "The user is describing a new product idea. Reflect back your "
             "understanding of the target users, the core workflow, and the "
             "problem it solves, then ask exactly ONE focused follow-up "
-            "question to clarify scope. " + CHAT_STYLE_RULE
+            "question to clarify scope. " + DISCOVERY_CHECKLIST + " " + CHAT_STYLE_RULE
         ),
     )
     state.messages.append(ChatMessage(role="assistant", text=result["text"]))
@@ -162,35 +180,144 @@ async def start_session(req: StartSessionRequest):
     return state
 
 
+SUMMARY_SYSTEM = (
+    "Enough has been shared to scope this product. Do NOT ask any further "
+    "questions. Respond with ONLY one paragraph, prefixed exactly with "
+    "'CONCEPT SUMMARY:' (that exact text, once), summarizing target users, "
+    "core workflow, input channels, privacy/visibility choices and "
+    "must-have features in 3-4 sentences. Keep every decision the user "
+    "stated -- do not drop or override any of them. " + CHAT_STYLE_RULE
+)
+
+BRIEF_JSON = """Respond with ONLY one JSON object, no markdown fences:
+{
+  "summary": "<2-3 sentence plain-language concept summary>",
+  "target_users": "<who it is for, as the user described them>",
+  "core_workflow": "<the main loop, in one or two sentences>",
+  "input_channels": "<how content/data enters the product>",
+  "privacy_mode": "<what is private vs shared/public, as the user stated>",
+  "market": "<launch market / geography / language>",
+  "platforms": "<which platforms ship first>",
+  "must_haves": ["<must-have capability>"],
+  "out_of_scope": ["<explicitly excluded or deferred>"],
+  "assumptions": ["<anything you had to ASSUME because the user did not say it -- phrase as 'Assumed: ...'>"]
+}
+Only use what the user actually said for every field except assumptions. If
+the user did not state a field, write "Not stated" and add a matching entry
+to assumptions describing a sensible default. Never invent a decision."""
+
+
+async def _summarize_and_brief(state: SessionState) -> None:
+    """Close Discovery: free-text summary for the chat log, then a
+    structured brief the user confirms/edits on the next screen."""
+    history = "\n".join(f"{m.role}: {m.text}" for m in state.messages)
+    result = await ai_router.generate(ai_router.Feature.DISCOVERY_CHAT_NLU, history, system=SUMMARY_SYSTEM)
+    text = result["text"]
+    if "CONCEPT SUMMARY:" not in text:
+        text = "CONCEPT SUMMARY: " + text.strip()
+    state.messages.append(ChatMessage(role="assistant", text=text))
+    summary = text.split("CONCEPT SUMMARY:", 1)[1].strip()
+
+    brief = ConceptBrief(summary=summary)
+    try:
+        b = await ai_router.generate(
+            ai_router.Feature.CONCEPT_BRIEF,
+            f"Discovery conversation:\n{history}\n\n{BRIEF_JSON}",
+            system="You turn a product discovery conversation into a structured, faithful concept brief.",
+        )
+        data = _extract_json_object(b["text"])
+        def _s(k):
+            return _clean_line(str(data.get(k, "") or ""))
+        def _l(k):
+            return [_clean_line(str(x)) for x in (data.get(k) or []) if str(x).strip()]
+        brief = ConceptBrief(
+            summary=_s("summary") or summary,
+            target_users=_s("target_users"), core_workflow=_s("core_workflow"),
+            input_channels=_s("input_channels"), privacy_mode=_s("privacy_mode"),
+            market=_s("market"), platforms=_s("platforms"),
+            must_haves=_l("must_haves"), out_of_scope=_l("out_of_scope"),
+            assumptions=_l("assumptions"),
+        )
+    except Exception as exc:  # brief is an aid; never block the user on it
+        logger.warning("Concept brief extraction failed for %s: %s", state.session_id, exc)
+    state.concept_brief = brief
+    state.concept_summary = summary
+    state.stage = "confirm"
+
+
 @router.post("/chat", response_model=SessionState)
 async def chat_turn(req: ChatTurnRequest):
     state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
+    if state.stage != "discovery":
+        raise HTTPException(409, "discovery is already complete for this idea")
 
     user_turns_so_far = sum(1 for m in state.messages if m.role == "user")
     state.messages.append(ChatMessage(role="user", text=req.message))
-    history = "\n".join(f"{m.role}: {m.text}" for m in state.messages)
 
     if user_turns_so_far >= MAX_CLARIFYING_TURNS:
-        system = (
-            "Enough has been shared to scope this product. Do NOT ask any "
-            "further questions. Respond with ONLY one paragraph, prefixed "
-            "exactly with 'CONCEPT SUMMARY:' (that exact text, once), "
-            "summarizing target users, core workflow, and must-have "
-            "features in 2-3 sentences. " + CHAT_STYLE_RULE
-        )
+        await _summarize_and_brief(state)
     else:
+        history = "\n".join(f"{m.role}: {m.text}" for m in state.messages)
         system = (
-            "Continue the Discovery Chat. Ask exactly ONE focused follow-up "
-            "question to clarify scope. " + CHAT_STYLE_RULE
+            "Continue the Discovery Chat. " + DISCOVERY_CHECKLIST + " If every "
+            "item is already clear, instead reply with ONLY a paragraph "
+            "prefixed 'CONCEPT SUMMARY:'. Otherwise ask exactly ONE focused "
+            "follow-up question. " + CHAT_STYLE_RULE
         )
+        result = await ai_router.generate(ai_router.Feature.DISCOVERY_CHAT_NLU, history, system=system)
+        if "CONCEPT SUMMARY:" in result["text"]:
+            await _summarize_and_brief(state)
+        else:
+            state.messages.append(ChatMessage(role="assistant", text=result["text"]))
+    await store.save_session(state)
+    return state
 
-    result = await ai_router.generate(ai_router.Feature.DISCOVERY_CHAT_NLU, history, system=system)
-    state.messages.append(ChatMessage(role="assistant", text=result["text"]))
-    if "CONCEPT SUMMARY:" in result["text"]:
-        state.concept_summary = result["text"].split("CONCEPT SUMMARY:", 1)[1].strip()
-        state.stage = "research"
+
+@router.post("/summarize", response_model=SessionState)
+async def summarize_now(req: SessionRequest):
+    """User pressed 'Summarise now' -- close Discovery with what we have."""
+    async with session_lock(req.session_id, "summarize"):
+        state = await store.get_session(req.session_id)
+        if not state:
+            raise HTTPException(404, "session not found")
+        if state.stage != "discovery":
+            return state
+        await _summarize_and_brief(state)
+        await store.save_session(state)
+        return state
+
+
+def _brief_to_summary(b: ConceptBrief) -> str:
+    """The confirmed brief becomes the concept text every later prompt
+    reads, so stated decisions (privacy mode, market, platforms) reach
+    research, module breakdown, flows and the BRD/PRD."""
+    parts = [b.summary.strip()]
+    for label, val in (
+        ("Target users", b.target_users), ("Core workflow", b.core_workflow),
+        ("Input channels", b.input_channels), ("Privacy / visibility", b.privacy_mode),
+        ("Launch market", b.market), ("Launch platforms", b.platforms),
+    ):
+        if val and val.strip() and val.strip().lower() != "not stated":
+            parts.append(f"{label}: {val.strip()}")
+    if b.must_haves:
+        parts.append("Must-haves: " + "; ".join(b.must_haves))
+    if b.out_of_scope:
+        parts.append("Out of scope: " + "; ".join(b.out_of_scope))
+    return "\n".join(p for p in parts if p)
+
+
+@router.post("/confirm", response_model=SessionState)
+async def confirm_brief(req: ConfirmBriefRequest):
+    state = await store.get_session(req.session_id)
+    if not state:
+        raise HTTPException(404, "session not found")
+    if state.stage not in ("confirm", "discovery"):
+        return state
+    state.concept_brief = req.brief
+    state.concept_summary = _brief_to_summary(req.brief)
+    state.stage = "research"
     await store.save_session(state)
     return state
 
@@ -205,10 +332,18 @@ async def run_research(req: ChatTurnRequest):
     and monetization models -- matching the depth of a manual
     Perplexity/Gemini research pass rather than a bare competitor list.
     """
-    state = await store.get_session(req.session_id)
-    if not state:
-        raise HTTPException(404, "session not found")
-    basis = state.concept_summary or req.message
+    async with session_lock(req.session_id, "research"):
+        state = await store.get_session(req.session_id)
+        if not state:
+            raise HTTPException(404, "session not found")
+        if state.research is not None:
+            # Another tab already ran it -- never pay for research twice.
+            return state
+        return await _run_research(state, req.message)
+
+
+async def _run_research(state: SessionState, fallback_basis: str) -> SessionState:
+    basis = state.concept_summary or fallback_basis
 
     result = await ai_router.generate(
         ai_router.Feature.COMPETITIVE_RESEARCH,
@@ -218,7 +353,9 @@ async def run_research(req: ChatTurnRequest):
             "Use web search to verify every product you name actually "
             "exists and is currently operating -- do not invent products or "
             "cite discontinued ones. Be specific to the idea given, never "
-            "generic. Output strict JSON only, per the schema in the prompt."
+            "generic. Quote prices in the currency of the stated launch "
+            "market (e.g. INR for India), with USD in brackets where useful. "
+            "Output strict JSON only, per the schema in the prompt."
         ),
     )
     try:
@@ -294,6 +431,20 @@ async def research_more(req: ResearchMoreRequest):
     state.research = existing
     state.companies = [f"{row.category}: {row.examples}" for row in existing.market_landscape]
     await store.save_session(state)
+    return state
+
+
+@router.post("/research/done", response_model=SessionState)
+async def research_done(req: SessionRequest):
+    """Research reviewed -- move on to Identity, where the name, domains,
+    tagline, colour theme and logo are chosen (2026-09-30: naming moved out
+    of Research into its own Identity studio)."""
+    state = await store.get_session(req.session_id)
+    if not state:
+        raise HTTPException(404, "session not found")
+    if state.stage == "research":
+        state.stage = "identity"
+        await store.save_session(state)
     return state
 
 

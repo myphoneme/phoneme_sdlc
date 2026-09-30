@@ -1,88 +1,117 @@
-import { useEffect, useState } from "react";
-import { Boxes, Link2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowRight, Check, CircleAlert, Clock, FileText, Link2, RotateCcw } from "lucide-react";
 import { api } from "../api.js";
 
-function Working({ title, text }) {
+const POLL_MS = 3000;
+
+export function GenerationBoard({ generation, showErrors = true }) {
+  const g = generation || { items: [], total: 0, done: 0, status: "idle" };
+  const failed = g.items.filter((i) => i.status === "failed").length;
+  const drafting = g.items.find((i) => i.status === "drafting");
+  const left = g.total - g.done - failed;
+  const pct = g.total ? Math.round((g.done / g.total) * 100) : 0;
   return (
-    <div className="working" role="status">
-      <span className="spinner" aria-hidden="true" />
-      <div><strong>{title}</strong><p>{text}</p></div>
+    <div className="gen-board">
+      <div className="gen-stats">
+        <div className="gen-stat"><span>Documents</span><strong>{g.total}</strong></div>
+        <div className="gen-stat good"><span>Completed</span><strong>{g.done}</strong></div>
+        <div className="gen-stat"><span>Remaining</span><strong>{Math.max(0, left)}</strong></div>
+        {failed > 0 && <div className="gen-stat bad"><span>Failed</span><strong>{failed}</strong></div>}
+      </div>
+      <div className="gen-meter" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label="Drafting progress">
+        <i style={{ width: `${pct}%` }} />
+      </div>
+      <p className="muted small">
+        {g.status === "done" ? "All documents drafted." : drafting ? <>Now drafting <strong>{drafting.req_id}</strong> — {drafting.module}</> : g.status === "failed" ? "Some documents failed — retry them below." : "Queued…"}
+        {" "}· {pct}% complete
+      </p>
+      <ol className="gen-list">
+        {g.items.map((it) => {
+          const core = it.module.toLowerCase().startsWith("platform-core");
+          return (
+            <li key={it.module} className={`gen-item ${it.status}`}>
+              <span className="gen-icon" aria-hidden="true">
+                {it.status === "done" ? <Check size={14} strokeWidth={3} /> : it.status === "drafting" ? <span className="spinner sm" /> : it.status === "failed" ? <CircleAlert size={15} /> : <Clock size={14} />}
+              </span>
+              <span className="req-id">{it.req_id}</span>
+              <span className="gen-module">{core ? <Link2 size={13} aria-hidden="true" /> : <FileText size={13} aria-hidden="true" />} {it.module}</span>
+              <span className={`gen-status ${it.status}`}>{{ done: "Drafted", drafting: "Drafting…", failed: "Failed", queued: "Queued", skipped: "Skipped" }[it.status] || it.status}</span>
+              {showErrors && it.error && <span className="gen-error">{it.error}</span>}
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }
 
-export default function Generating({ session, setSession, setRequirements, freezeOnly }) {
-  const [loading, setLoading] = useState(false);
+export default function Generating({ session, setSession, setRequirements }) {
   const [error, setError] = useState(null);
-  const [generated, setGenerated] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const started = useRef(false);
+  const g = session.generation || {};
 
+  // Start (idempotent on the server — a second tab or a refresh just
+  // re-attaches to the run already in progress).
   useEffect(() => {
-    if (!session) return;
-    if (freezeOnly && session.modules.length === 0) {
-      setLoading(true);
-      api
-        .freeze(session.session_id)
-        .then(setSession)
-        .catch((e) => setError(e.message))
-        .finally(() => setLoading(false));
-    }
-    if (!freezeOnly) {
-      setLoading(true);
-      api
-        .generate(session.session_id)
-        .then((reqs) => {
-          setGenerated(reqs);
-          setRequirements(reqs);
-          setSession((s) => ({ ...s, stage: "manager" }));
-        })
-        .catch((e) => setError(e.message))
-        .finally(() => setLoading(false));
+    if (started.current) return;
+    started.current = true;
+    if (g.status !== "running" && g.status !== "done") {
+      api.generate(session.session_id).then(setSession).catch((e) => setError(e.message));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [freezeOnly, session?.session_id]);
+  }, []);
 
-  if (!session) return null;
+  // Poll live progress until the run finishes.
+  useEffect(() => {
+    if (g.status === "done" || g.status === "failed") return undefined;
+    const t = setInterval(async () => {
+      try {
+        const s = await api.getSession(session.session_id);
+        setSession(s);
+        if (s.generation?.status === "done" || s.stage === "manager") {
+          setRequirements(await api.listRequirements(session.session_id));
+        }
+      } catch {
+        /* transient — keep polling */
+      }
+    }, POLL_MS);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [g.status]);
 
-  if (freezeOnly) {
-    return (
-      <div className="freeze">
-        {error && <div className="error-banner" role="alert">{error}</div>}
-        {loading && session.modules.length === 0 && (
-          <Working title="Drafting the module breakdown…" text="Splitting the concept into buildable modules." />
-        )}
-        {session.modules.length > 0 && (
-          <ul className="module-grid">
-            {session.modules.map((m, i) => {
-              const core = m.startsWith("Platform-Core");
-              return (
-                <li key={i} className={"module-tile" + (core ? " core" : "")}>
-                  <span className="module-icon" aria-hidden="true">{core ? <Link2 size={16} /> : <Boxes size={16} />}</span>
-                  <span className="module-name">{m}</span>
-                  {core && <span className="chip">Shared contract</span>}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-    );
+  async function retry() {
+    setBusy(true);
+    setError(null);
+    try {
+      setSession(await api.retryGenerate(session.session_id));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openManager() {
+    setRequirements(await api.listRequirements(session.session_id));
+    setSession({ ...session, stage: "manager" });
   }
 
   return (
     <div className="generating">
       {error && <div className="error-banner" role="alert">{error}</div>}
-      {loading && (
-        <Working title="Drafting requirements for each module…" text="This uses the commercial model tier per the routing policy, so it can take a minute or two." />
+      <GenerationBoard generation={g} />
+      {g.status === "failed" && (
+        <div className="sticky-actions">
+          <span className="muted">The drafted documents are saved. Retry only re-runs the failed ones.</span>
+          <button className="btn-primary" disabled={busy} onClick={retry}><RotateCcw size={15} /> Retry failed</button>
+        </div>
       )}
-      {generated.length > 0 && (
-        <ul className="module-grid">
-          {generated.map((r) => (
-            <li key={r.req_id} className="module-tile">
-              <span className="req-id">{r.req_id}</span>
-              <span className="module-name">{r.title}</span>
-            </li>
-          ))}
-        </ul>
+      {g.status === "done" && session.stage !== "manager" && (
+        <div className="sticky-actions">
+          <span className="muted">All {g.total} documents drafted.</span>
+          <button className="btn-primary" onClick={openManager}>Open BRD/PRD Manager <ArrowRight size={16} /></button>
+        </div>
       )}
     </div>
   );

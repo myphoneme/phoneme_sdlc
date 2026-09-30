@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ArrowDown, ArrowUp, PenLine, Plus, Trash2 } from "lucide-react";
 import { api } from "../api.js";
 
 function statusClass(status) {
@@ -7,77 +8,107 @@ function statusClass(status) {
   return "chip";
 }
 
+function StepEditor({ steps, onSave, onCancel, busy }) {
+  const [list, setList] = useState(steps);
+  const edit = (i, v) => setList((l) => l.map((x, j) => (j === i ? v : x)));
+  const move = (i, d) => setList((l) => {
+    const n = [...l];
+    const j = i + d;
+    if (j < 0 || j >= n.length) return l;
+    [n[i], n[j]] = [n[j], n[i]];
+    return n;
+  });
+  const insert = (i) => setList((l) => [...l.slice(0, i + 1), "", ...l.slice(i + 1)]);
+  const remove = (i) => setList((l) => l.filter((_, j) => j !== i));
+  const clean = list.map((x) => x.trim()).filter(Boolean);
+  return (
+    <div className="step-editor">
+      <ol>
+        {list.map((st, i) => (
+          <li key={i}>
+            <span className="step-no">{i + 1}</span>
+            <textarea rows={2} value={st} aria-label={`Step ${i + 1}`} placeholder="Describe this step…" onChange={(e) => edit(i, e.target.value)} />
+            <span className="step-tools">
+              <button type="button" className="icon-btn" aria-label="Move step up" disabled={i === 0} onClick={() => move(i, -1)}><ArrowUp size={14} /></button>
+              <button type="button" className="icon-btn" aria-label="Move step down" disabled={i === list.length - 1} onClick={() => move(i, 1)}><ArrowDown size={14} /></button>
+              <button type="button" className="icon-btn" aria-label="Insert a step below" onClick={() => insert(i)}><Plus size={14} /></button>
+              <button type="button" className="icon-btn danger" aria-label="Delete step" onClick={() => remove(i)}><Trash2 size={14} /></button>
+            </span>
+          </li>
+        ))}
+      </ol>
+      <button type="button" className="add-row" onClick={() => setList((l) => [...l, ""])}><Plus size={16} /> Add a step</button>
+      <div className="requirement-actions">
+        <button className="btn-secondary" disabled={busy} onClick={onCancel}>Cancel</button>
+        <button className="btn-primary" disabled={busy || clean.length === 0} onClick={() => onSave(clean)}>Save flow</button>
+      </div>
+    </div>
+  );
+}
+
 function FlowCard({ sessionId, flow, onChange }) {
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [error, setError] = useState(null);
 
-  async function submitComment() {
-    if (!comment.trim()) return;
+  async function act(fn) {
     setBusy(true);
     setError(null);
     try {
-      onChange(await api.commentFlow(sessionId, flow.module, comment.trim()));
-      setComment("");
+      onChange(await fn());
+      return true;
     } catch (e) {
       setError(e.message);
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  async function accept() {
-    setBusy(true);
-    try {
-      onChange(await api.acceptFlow(sessionId, flow.module));
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function discard() {
-    setBusy(true);
-    try {
-      onChange(await api.discardFlow(sessionId, flow.module));
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const submitComment = async () => {
+    if (!comment.trim()) return;
+    if (await act(() => api.commentFlow(sessionId, flow.module, comment.trim()))) setComment("");
+  };
 
   return (
-    <div className="requirement-card">
+    <div className={"requirement-card" + (flow.status === "Approved" ? " approved" : "")}>
       <div className="requirement-header">
         <span className="req-title">{flow.module}</span>
         <span className="req-count">{flow.steps.length} steps</span>
         <span className={statusClass(flow.status)}>{flow.status}</span>
+        {!editing && !flow.revised_steps && (
+          <button type="button" className="btn-secondary sm" disabled={busy} onClick={() => setEditing(true)}><PenLine size={14} /> Edit steps</button>
+        )}
       </div>
 
-      <ol className="flow-step-list">
-        {flow.steps.map((s, i) => (
-          <li key={i}>{s}</li>
-        ))}
-      </ol>
+      {editing ? (
+        <StepEditor
+          steps={flow.steps}
+          busy={busy}
+          onCancel={() => setEditing(false)}
+          onSave={async (steps) => { if (await act(() => api.updateFlow(sessionId, flow.module, steps))) setEditing(false); }}
+        />
+      ) : (
+        <ol className="flow-step-list">
+          {flow.steps.map((s, i) => <li key={i}>{s}</li>)}
+        </ol>
+      )}
 
       {flow.revised_steps && (
         <div className="diff-block">
           <div className="diff-label">Proposed revision</div>
           <ol className="flow-step-list flow-step-list-new">
-            {flow.revised_steps.map((s, i) => (
-              <li key={i}>{s}</li>
-            ))}
+            {flow.revised_steps.map((s, i) => <li key={i}>{s}</li>)}
           </ol>
           <div className="requirement-actions">
-            <button className="btn-primary" disabled={busy} onClick={accept}>Accept &amp; use this flow</button>
-            <button className="btn-secondary" disabled={busy} onClick={discard}>Discard</button>
+            <button className="btn-secondary" disabled={busy} onClick={() => act(() => api.discardFlow(sessionId, flow.module))}>Discard</button>
+            <button className="btn-primary" disabled={busy} onClick={() => act(() => api.acceptFlow(sessionId, flow.module))}>Accept &amp; use this flow</button>
           </div>
         </div>
       )}
 
-      {!flow.revised_steps && (
+      {!editing && !flow.revised_steps && (
         <div className="comment-row">
           <textarea
             className="chat-textarea"
@@ -89,23 +120,20 @@ function FlowCard({ sessionId, flow, onChange }) {
                 if (!busy && comment.trim()) submitComment();
               }
             }}
-            placeholder="Redirect this flow before it's locked in — e.g. which channel/integration to use, what gets auto-created vs. confirmed by the user… (Shift+Enter for a new line)"
+            placeholder="Or describe a change and let GiveWings AI rework the whole flow — e.g. which channel to use, what is automatic vs. confirmed by the user…"
             disabled={busy}
-            rows={3}
+            rows={2}
           />
-          <button className="btn-secondary" disabled={busy || !comment.trim()} onClick={submitComment}>
-            Regenerate from comment
-          </button>
+          <div className="requirement-actions">
+            <button className="btn-secondary" disabled={busy || !comment.trim()} onClick={submitComment}>Rework with AI</button>
+            {flow.status !== "Approved" && (
+              <button className="btn-primary" disabled={busy} onClick={() => act(() => api.acceptFlow(sessionId, flow.module))}>Approve flow</button>
+            )}
+          </div>
         </div>
       )}
 
-      {!flow.revised_steps && flow.status !== "Approved" && (
-        <div className="requirement-actions">
-          <button className="btn-primary" disabled={busy} onClick={accept}>Approve this flow</button>
-        </div>
-      )}
-
-      {error && <div className="error-banner">{error}</div>}
+      {error && <div className="error-banner" role="alert">{error}</div>}
     </div>
   );
 }
@@ -119,14 +147,24 @@ export default function ModuleFlowReview({ session, setSession }) {
   );
   const allApproved = reviewable.length > 0 && reviewable.every((f) => f.status === "Approved");
 
+  const expected = (session?.modules || []).filter((m) => !m.toLowerCase().startsWith("platform-core")).length;
+
   useEffect(() => {
-    if (session && session.module_flows.length === 0) {
+    if (session && reviewable.length < expected) {
       setLoading(true);
+      // Flows are saved one by one on the server; poll so each appears as
+      // soon as it is drafted instead of waiting for the whole batch.
+      const poll = setInterval(() => {
+        api.getSession(session.session_id).then((s) => {
+          if ((s.module_flows || []).length > (session.module_flows || []).length) setSession(s);
+        }).catch(() => {});
+      }, 3000);
       api
         .generateFlows(session.session_id)
         .then(setSession)
         .catch((e) => setError(e.message))
-        .finally(() => setLoading(false));
+        .finally(() => { clearInterval(poll); setLoading(false); });
+      return () => clearInterval(poll);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.session_id]);
@@ -153,10 +191,10 @@ export default function ModuleFlowReview({ session, setSession }) {
 
   return (
     <div className="review">
-      {loading && (session?.module_flows || []).length === 0 && (
+      {loading && (
         <div className="working" role="status">
           <span className="spinner" aria-hidden="true" />
-          <div><strong>Drafting sequence flows for each module…</strong><p>Frontend and backend steps, in order, for every module.</p></div>
+          <div><strong>Drafting sequence flows — {reviewable.length} of {expected} ready</strong><p>You can start reviewing the ones below while the rest are drafted.</p></div>
         </div>
       )}
       {error && <div className="error-banner" role="alert">{error}</div>}

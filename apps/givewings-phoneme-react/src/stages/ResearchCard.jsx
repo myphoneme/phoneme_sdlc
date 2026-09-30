@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, BadgeCheck, Coins, ExternalLink, Lightbulb, Search, Star, Target, TrendingUp } from "lucide-react";
+import { AlertTriangle, ArrowRight, BadgeCheck, Coins, ExternalLink, Lightbulb, Search, Star, Target, TrendingUp } from "lucide-react";
 import { api } from "../api.js";
 
 function Section({ icon: Icon, title, children }) {
@@ -11,74 +11,9 @@ function Section({ icon: Icon, title, children }) {
   );
 }
 
-export default function ResearchCard({ session, setSession }) {
-  const [loading, setLoading] = useState(false);
-  const [moreQuery, setMoreQuery] = useState("");
-  const [customName, setCustomName] = useState("");
-  const [checking, setChecking] = useState(false);
-  const [error, setError] = useState(null);
 
-  const research = session?.research;
-  const hasReport = research && (
-    research.market_landscape?.length ||
-    research.viability_verdict ||
-    research.recommended_features?.length
-  );
-
-  useEffect(() => {
-    if (session && !session.research && session.companies.length === 0) {
-      setLoading(true);
-      api
-        .research(session.session_id)
-        .then(setSession)
-        .catch((e) => setError(e.message))
-        .finally(() => setLoading(false));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.session_id]);
-
-  async function searchMore() {
-    if (!moreQuery.trim()) return;
-    setLoading(true);
-    try {
-      setSession(await api.researchMore(session.session_id, moreQuery.trim()));
-      setMoreQuery("");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function checkAndSelect(name) {
-    setChecking(true);
-    setError(null);
-    try {
-      const withCheck = await api.checkName(session.session_id, name);
-      setSession(withCheck);
-      const chosen = await api.selectName(session.session_id, name);
-      setSession(chosen);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setChecking(false);
-    }
-  }
-
-  if (!session) return null;
-
-  const suggestedNames = session.suggested_names?.length ? session.suggested_names : [];
-
+export function ResearchReportView({ research }) {
   return (
-    <div className="research">
-      {loading && !hasReport && (
-        <div className="working" role="status">
-          <span className="spinner" aria-hidden="true" />
-          <div><strong>Researching the live web…</strong><p>Scanning competitors, pricing and demand signals. This usually takes under a minute.</p></div>
-        </div>
-      )}
-
-      {hasReport && (
         <div className="research-report">
           {research.market_landscape?.length > 0 && (
             <Section icon={Target} title="Market landscape">
@@ -150,7 +85,89 @@ export default function ResearchCard({ session, setSession }) {
             </details>
           )}
         </div>
+  );
+}
+
+export default function ResearchCard({ session, setSession }) {
+  const [loading, setLoading] = useState(false);
+  const [moreQuery, setMoreQuery] = useState("");
+  const [customName, setCustomName] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState(null);
+
+  const research = session?.research;
+  const hasReport = research && (
+    research.market_landscape?.length ||
+    research.viability_verdict ||
+    research.recommended_features?.length
+  );
+
+  useEffect(() => {
+    if (session && !session.research && session.companies.length === 0) {
+      setLoading(true);
+      api
+        .research(session.session_id)
+        .then(setSession)
+        .catch((e) => setError(e.message))
+        .finally(() => setLoading(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.session_id]);
+
+  async function searchMore() {
+    if (!moreQuery.trim()) return;
+    setLoading(true);
+    try {
+      setSession(await api.researchMore(session.session_id, moreQuery.trim()));
+      setMoreQuery("");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function checkAndSelect(name) {
+    setChecking(true);
+    setError(null);
+    try {
+      const withCheck = await api.checkName(session.session_id, name);
+      setSession(withCheck);
+      const chosen = await api.selectName(session.session_id, name);
+      setSession(chosen);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function continueToIdentity() {
+    setChecking(true);
+    setError(null);
+    try {
+      setSession(await api.researchDone(session.session_id));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  if (!session) return null;
+
+  const suggestedNames = session.suggested_names?.length ? session.suggested_names : [];
+
+  return (
+    <div className="research">
+      {loading && !hasReport && (
+        <div className="working" role="status">
+          <span className="spinner" aria-hidden="true" />
+          <div><strong>Researching the live web…</strong><p>Scanning competitors, pricing and demand signals. This usually takes under a minute.</p></div>
+        </div>
       )}
+
+      {hasReport && <ResearchReportView research={research} />}
 
       {!hasReport && !loading && session.companies.length > 0 && (
         <div className="found-list">
@@ -175,39 +192,18 @@ export default function ResearchCard({ session, setSession }) {
 
       {error && <div className="error-banner" role="alert">{error}</div>}
 
-      <section className="decision-card">
-        <div className="decision-head">
-          <span className="step-badge">Next</span>
-          <div>
-            <h3>Pick a product name</h3>
-            <p>Choose a suggestion or type your own — GiveWings checks availability before using it.</p>
-          </div>
-        </div>
-        {suggestedNames.length > 0 ? (
-          <div className="choice-row">
-            {suggestedNames.map((n) => (
-              <button key={n} className="opt-chip" disabled={checking} onClick={() => checkAndSelect(n)}>{n}</button>
-            ))}
-          </div>
-        ) : (
-          <p className="muted">{loading ? "Generating name ideas from your concept…" : "Type a name below to check and use it."}</p>
-        )}
-        <div className="inline-field">
-          <input
-            value={customName}
-            onChange={(e) => setCustomName(e.target.value)}
-            placeholder="Or type your own name…"
-            aria-label="Your own product name"
-            disabled={checking}
-          />
-          <button className="btn-primary" disabled={checking || !customName.trim()} onClick={() => checkAndSelect(customName.trim())}>
-            {checking ? "Checking…" : "Check & use name"}
+      {hasReport && (
+        <div className="sticky-actions">
+          <span className="muted">
+            {suggestedNames.length > 0
+              ? <>Name ideas from research: <strong>{suggestedNames.join(", ")}</strong> — you will pick the name and check domains next.</>
+              : "Next you will pick the name, check domains, and build the brand."}
+          </span>
+          <button className="btn-primary" disabled={checking} onClick={continueToIdentity}>
+            {checking ? "Opening…" : "Continue to Identity"} <ArrowRight size={16} />
           </button>
         </div>
-        {session.selected_name && (
-          <div className="callout success"><BadgeCheck size={20} aria-hidden="true" /><div><strong>{session.selected_name}</strong><p>Name selected — moving to theme selection…</p></div></div>
-        )}
-      </section>
+      )}
     </div>
   );
 }

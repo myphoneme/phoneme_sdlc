@@ -29,6 +29,8 @@ class Feature(str, Enum):
     REGENERATE_FROM_COMMENTS = "regenerate_from_comments"
     MODULE_BREAKDOWN = "module_breakdown"
     COMPETITIVE_RESEARCH = "competitive_research"
+    CONCEPT_BRIEF = "concept_brief"
+    BRAND_IDENTITY = "brand_identity"
     # Non-critical — Ollama tier (BRD/PRD Section 18.8)
     DISCOVERY_CHAT_NLU = "discovery_chat_nlu"
     NAME_AVAILABILITY_CHECK = "name_availability_check"
@@ -40,6 +42,8 @@ CRITICAL_FEATURES = {
     Feature.REGENERATE_FROM_COMMENTS,
     Feature.MODULE_BREAKDOWN,
     Feature.COMPETITIVE_RESEARCH,
+    Feature.CONCEPT_BRIEF,
+    Feature.BRAND_IDENTITY,
 }
 
 # Features that should be answered with live web-search grounding rather
@@ -91,7 +95,7 @@ async def _call_anthropic(prompt: str, system: str | None = None, use_search: bo
         # Search-grounded calls return a lot more structured content
         # (market tables, phased feature lists, citations) than a plain
         # generation -- give them more room than the 2048-token default.
-        "max_tokens": 4096 if use_search else 2048,
+        "max_tokens": 4096,
         "messages": [{"role": "user", "content": prompt}],
     }
     if system:

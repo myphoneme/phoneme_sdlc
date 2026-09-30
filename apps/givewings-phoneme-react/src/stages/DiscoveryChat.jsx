@@ -22,6 +22,20 @@ export default function DiscoveryChat({ session, setSession }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages.length, loading]);
 
+  async function summarizeNow() {
+    setLoading(true);
+    setError(null);
+    try {
+      setSession(await api.summarize(session.session_id));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const answered = messages.filter((m) => m.role === "user").length;
+
   async function send() {
     if (!input.trim()) return;
     setLoading(true);
@@ -79,9 +93,8 @@ export default function DiscoveryChat({ session, setSession }) {
         <div className="callout success">
           <CheckCircle2 size={20} aria-hidden="true" />
           <div>
-            <strong>Concept locked in</strong>
-            <p>{session.concept_summary}</p>
-            <small>Moving on to market research…</small>
+            <strong>Concept summarised</strong>
+            <p>Opening the concept brief for you to confirm…</p>
           </div>
         </div>
       ) : (
@@ -103,9 +116,16 @@ export default function DiscoveryChat({ session, setSession }) {
           />
           <div className="composer-bar">
             <span className="composer-hint"><kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line</span>
-            <button className="btn-primary" onClick={send} disabled={loading || !input.trim()}>
-              {loading ? "Thinking…" : "Send"} <ArrowUp size={16} />
-            </button>
+            <div className="composer-actions">
+              {session && answered >= 1 && (
+                <button className="btn-secondary" onClick={summarizeNow} disabled={loading} title="Stop the questions and review the concept summary">
+                  Summarise now
+                </button>
+              )}
+              <button className="btn-primary" onClick={send} disabled={loading || !input.trim()}>
+                {loading ? "Thinking…" : "Send"} <ArrowUp size={16} />
+              </button>
+            </div>
           </div>
         </div>
       )}
