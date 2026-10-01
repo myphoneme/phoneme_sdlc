@@ -514,6 +514,16 @@ button.journey-link:hover { background: #faf6f2; }
 .warn-callout { border-color: #f0c9a6; }
 .sticky-actions .muted svg { vertical-align: -2px; margin-right: 4px; }
 
+.module-edit.editing { border-color: #ffb27a; box-shadow: 0 0 0 4px #ff72001a; }
+.module-view-name { flex: 1; min-width: 0; margin: 0; font: 800 15.5px Manrope, sans-serif; letter-spacing: -.02em; color: #171717; }
+.module-view-desc { font-size: 14px; line-height: 1.65; color: #3d3f44; white-space: pre-wrap; }
+.module-tools .btn-primary.sm-primary, .module-tools .btn-secondary.sm { height: 32px; padding: 0 12px; font-size: 12px; }
+.inline-confirm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid #f5c9c9; border-radius: 10px; background: #fdecec; font-size: 13px; font-weight: 700; color: #8f2020; }
+.inline-confirm span { flex: 1; }
+.wizard-shell .btn-primary.danger-btn { background: #b42318; height: 32px; padding: 0 12px; font-size: 12px; }
+.wizard-shell .btn-primary.danger-btn svg { color: #fff; }
+.add-row:disabled { opacity: .5; cursor: not-allowed; }
+
 /* ---------- Scrollbars ---------- */
 .chat-log::-webkit-scrollbar, .research-table-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
 .chat-log::-webkit-scrollbar-thumb, .research-table-wrap::-webkit-scrollbar-thumb { background: #e6ded7; border-radius: 8px; }
@@ -565,3 +575,6 @@ button.journey-link:hover { background: #faf6f2; }
 @media (prefers-reduced-motion: reduce) {
   .stage-panel, .msg, .spinner, .typing-dot { animation: none !important; }
 }
+.field-error { margin: 8px 0 0; font-size: 12.5px; font-weight: 700; color: #b42318; }
+.module-edit .module-top .chip { flex-shrink: 0; }
+.module-edit.editing .module-tools { flex-direction: column; align-items: stretch; }
