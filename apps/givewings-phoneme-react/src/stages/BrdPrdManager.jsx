@@ -46,7 +46,7 @@ function RequirementCard({ sessionId, req, onChange, open, onToggle }) {
         <span className="req-id">{req.req_id}</span>
         <span className="doc-title">
           <strong>{req.title}</strong>
-          <small>{req.module} · {counts}</small>
+          <small>{req.module} · {counts}{req.standard_version && <> · <span className="std-tag">GiveWings standard v{req.standard_version}</span></>}</small>
         </span>
         {req.status === "Frozen" && <Lock size={14} aria-hidden="true" className="frozen-lock" />}
         <span className={statusClass(req.status)}>{req.status}</span>

@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 
-from .. import ai_router, reqdoc, store
+from .. import ai_router, foundation, reqdoc, store
 from ..locks import session_lock
 from ..models import (
     ArchivedRequirementSet,
@@ -88,10 +88,29 @@ def _extract_json(text: str) -> dict:
 
 
 def _sync_module_names(state: SessionState) -> None:
-    state.modules = [
-        (f"Platform-Core: {m.name}" if m.platform_core and not m.name.lower().startswith("platform-core") else m.name)
-        for m in state.module_specs
-    ]
+    state.module_specs = foundation.ensure(state.module_specs)
+    state.modules = [m.name for m in state.module_specs]
+
+
+def _is_standard(state: SessionState, module: str) -> bool:
+    return bool(foundation.key_for(state.module_specs, module))
+
+
+ACCESS_TEXT = {
+    "signed_in": "Only signed-in users can use this module.",
+    "public": "This module is public: visitors use it without signing in (e.g. landing page, trial tool, contest).",
+    "mixed": "Visitors can use a public trial part of this module without signing in; the full feature needs sign-in.",
+}
+
+STANDARD_RULE = (
+    "Every GiveWings product is self-contained and already includes these "
+    "STANDARD modules, written from GiveWings templates: Sign-in & Account; "
+    "Profile & Settings; Admin Dashboard & Roles; Security, Audit & Health. "
+    "Do NOT propose modules for sign-in/sign-up/logout, accounts, profiles, "
+    "settings, admin consoles, roles/permissions, security, audit logs, "
+    "health monitoring or backups -- list only the business modules specific "
+    "to this product."
+)
 
 
 MODULE_SIZING_RULE = (
@@ -107,12 +126,12 @@ def module_map(state: SessionState, current: str | None = None) -> str:
     """All modules with their responsibilities, so every flow/requirement is
     written knowing its neighbours (2026-09-30: drafting each module in
     isolation made every document retell the whole product)."""
-    specs = state.module_specs or [ModuleSpec(name=m, platform_core=_is_platform_core(m)) for m in state.modules]
+    specs = foundation.ensure(state.module_specs or [ModuleSpec(name=m) for m in state.modules])
     lines = []
     for m in specs:
-        name = f"Platform-Core: {m.name}" if m.platform_core and not m.name.lower().startswith("platform-core") else m.name
-        mark = "  <-- THIS MODULE" if current and (name == current or m.name == current) else ""
-        lines.append(f"- {name}: {m.description or 'no description'}{mark}")
+        tag = " [standard module]" if m.kind == "standard" else ""
+        mark = "  <-- THIS MODULE" if current and m.name == current else ""
+        lines.append(f"- {m.name}{tag}: {m.description or 'no description'}{mark}")
     return "\n".join(lines)
 
 
@@ -134,13 +153,16 @@ async def freeze_scope(req: FreezeRequest):
         state = await store.get_session(req.session_id)
         if not state:
             raise HTTPException(404, "session not found")
-        if state.module_specs:
-            return state
-        if state.modules:  # sessions frozen before module_specs existed
-            state.module_specs = [
-                ModuleSpec(name=m, platform_core=_is_platform_core(m)) for m in state.modules
-            ]
-            await store.save_session(state)
+        if state.module_specs or state.modules:
+            # Existing scope (incl. sessions from before standard modules
+            # existed): make sure the standard modules are present.
+            if not state.module_specs:
+                state.module_specs = [ModuleSpec(name=m, platform_core=_is_platform_core(m)) for m in state.modules]
+            before = [m.model_dump() for m in state.module_specs]
+            if state.stage == "freeze":
+                _sync_module_names(state)
+                if [m.model_dump() for m in state.module_specs] != before:
+                    await store.save_session(state)
             return state
 
         research_context = _research_context(state)
@@ -150,13 +172,13 @@ async def freeze_scope(req: FreezeRequest):
             f"{research_context}\n\n"
             "Break this product down into functional modules for a BRD/PRD, "
             "in the order they would be built. " + MODULE_SIZING_RULE + " "
-            "Authentication, security and "
-            "API-gateway concerns are provided by Platform-Core (BRD/PRD "
-            "Section 18.6): include them as modules with platform_core true "
-            "rather than drafting them as new modules. Respond with ONLY "
+            + STANDARD_RULE + " For each module say who may use it: "
+            '"signed_in" (default), "public" (marketing pages, contests, free '
+            'tools anyone can use without an account) or "mixed" (a public '
+            "trial part plus the full feature after sign-in). Respond with ONLY "
             'JSON: {"modules": [{"name": "short module name", "description": '
             '"one sentence on what this module is responsible for", '
-            '"platform_core": false}]}',
+            '"access": "signed_in", "access_note": "what visitors can do without signing in, if public/mixed"}]}',
             system="You are the module-breakdown step of the Idea-to-BRD/PRD Wizard. JSON only.",
         )
         specs: list[ModuleSpec] = []
@@ -164,16 +186,15 @@ async def freeze_scope(req: FreezeRequest):
             data = _extract_json(result["text"])
             for m in data.get("modules", []):
                 if isinstance(m, dict) and str(m.get("name", "")).strip():
-                    name = _strip_markdown(str(m["name"]).strip())
-                    core = bool(m.get("platform_core")) or _is_platform_core(name)
-                    name = re.sub(r"^platform-core:\s*", "", name, flags=re.I)
-                    specs.append(ModuleSpec(name=name, description=_strip_markdown(str(m.get("description", ""))), platform_core=core))
+                    name = re.sub(r"^platform-core:\s*", "", _strip_markdown(str(m["name"]).strip()), flags=re.I)
+                    if foundation.covers(name):
+                        continue
+                    specs.append(_business_spec(name, m))
         except (ValueError, json.JSONDecodeError):
             for l in result["text"].splitlines():
                 l = _strip_markdown(l.strip("-• ").strip())
-                if l:
-                    core = _is_platform_core(l)
-                    specs.append(ModuleSpec(name=re.sub(r"^platform-core:\s*", "", l, flags=re.I), platform_core=core))
+                if l and not foundation.covers(l):
+                    specs.append(ModuleSpec(name=re.sub(r"^platform-core:\s*", "", l, flags=re.I)))
         state.module_specs = specs
         _sync_module_names(state)
         await store.save_session(state)
@@ -187,10 +208,23 @@ async def save_modules(req: ModulesSaveRequest):
         raise HTTPException(404, "session not found")
     if state.stage != "freeze":
         raise HTTPException(409, "scope is already frozen")
-    cleaned = [
-        ModuleSpec(name=m.name.strip(), description=m.description.strip(), platform_core=m.platform_core)
-        for m in req.modules if m.name.strip()
-    ]
+    # Standard modules can't be removed or renamed; keep their tailoring
+    # unless the request carries a new one.
+    cleaned = [m for m in state.module_specs if m.kind == "standard"
+               and not any(r.kind == "standard" and r.standard_key == m.standard_key for r in req.modules)]
+    for m in req.modules:
+        if m.kind == "standard":
+            if m.standard_key in foundation.BY_KEY:
+                cleaned.append(foundation.standard_spec(m.standard_key, m.tailoring.strip()))
+            continue
+        if not m.name.strip():
+            continue
+        if m.name.strip().lower() in foundation.NAMES:
+            raise HTTPException(400, f"'{m.name.strip()}' is a standard module and is already included")
+        cleaned.append(ModuleSpec(
+            name=m.name.strip(), description=m.description.strip(), merged_from=m.merged_from,
+            access=m.access if m.access in ACCESS_TEXT else "signed_in", access_note=m.access_note.strip(),
+        ))
     names = [m.name.lower() for m in cleaned]
     if len(names) != len(set(names)):
         raise HTTPException(400, "module names must be unique")
@@ -206,7 +240,8 @@ async def confirm_modules(req: SessionRequest):
     state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
-    if not [m for m in state.module_specs if not m.platform_core]:
+    _sync_module_names(state)
+    if not [m for m in state.module_specs if m.kind != "standard"]:
         raise HTTPException(400, "add at least one product module before freezing scope")
     if state.stage == "freeze":
         _sync_module_names(state)
@@ -215,6 +250,8 @@ async def confirm_modules(req: SessionRequest):
         if state.scope_revision > 0:
             # Boundaries moved -- surviving flows must be re-approved.
             for f in state.module_flows:
+                if f.standard:
+                    continue
                 f.status = "Draft"
                 f.revised_steps = None
         state.stage = "flow"
@@ -224,6 +261,15 @@ async def confirm_modules(req: SessionRequest):
 
 def _is_platform_core(module: str) -> bool:
     return module.strip().lower().startswith("platform-core")
+
+
+def _business_spec(name: str, m: dict) -> ModuleSpec:
+    access = str(m.get("access") or "signed_in").strip().lower()
+    return ModuleSpec(
+        name=name, description=_strip_markdown(str(m.get("description", ""))),
+        access=access if access in ACCESS_TEXT else "signed_in",
+        access_note=_strip_markdown(str(m.get("access_note") or "")) if access != "signed_in" else "",
+    )
 
 
 @router.post("/modules/consolidate")
@@ -236,18 +282,20 @@ async def consolidate_modules(req: ConsolidateRequest):
         raise HTTPException(404, "session not found")
     if state.stage != "freeze":
         raise HTTPException(409, "reopen scope before restructuring modules")
-    target = f"Aim for exactly {req.target} product modules (plus any Platform-Core). " if req.target else ""
+    target = f"Aim for exactly {req.target} product modules. " if req.target else ""
     result = await ai_router.generate(
         ai_router.Feature.MODULE_BREAKDOWN,
         f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n\n"
         f"Current modules:\n{module_map(state)}\n\n"
         f"Reviewer instruction: {req.instruction or 'Remove overlap and simplify.'}\n"
-        f"{target}{MODULE_SIZING_RULE}\n\n"
-        "Propose a new module list. Every capability of the current modules "
-        "must still belong to exactly one new module. Respond with ONLY JSON: "
+        f"{target}{MODULE_SIZING_RULE} {STANDARD_RULE}\n\n"
+        "Propose a new list of the product (business) modules only. Every "
+        "business capability of the current modules must still belong to "
+        "exactly one new module. Respond with ONLY JSON: "
         '{"rationale": "2-3 sentences on what was merged and why", '
         '"modules": [{"name": "...", "description": "one sentence on what it owns", '
-        '"platform_core": false, "merged_from": ["<current module names it replaces>"]}]}',
+        '"access": "signed_in|public|mixed", "access_note": "", '
+        '"merged_from": ["<current module names it replaces>"]}]}',
         system="You are a pragmatic product architect simplifying a module breakdown. JSON only.",
     )
     try:
@@ -258,11 +306,11 @@ async def consolidate_modules(req: ConsolidateRequest):
     for m in data.get("modules", []):
         if isinstance(m, dict) and str(m.get("name", "")).strip():
             name = re.sub(r"^platform-core:\s*", "", _strip_markdown(str(m["name"]).strip()), flags=re.I)
-            specs.append(ModuleSpec(
-                name=name, description=_strip_markdown(str(m.get("description", ""))),
-                platform_core=bool(m.get("platform_core")) or _is_platform_core(str(m["name"])),
-                merged_from=[_strip_markdown(str(x)) for x in (m.get("merged_from") or []) if str(x).strip()],
-            ))
+            if name.lower() in foundation.NAMES or foundation.covers(name):
+                continue
+            spec = _business_spec(name, m)
+            spec.merged_from = [_strip_markdown(str(x)) for x in (m.get("merged_from") or []) if str(x).strip()]
+            specs.append(spec)
     if not specs:
         raise HTTPException(502, "the AI did not return a usable proposal — try again")
     return {"rationale": _strip_markdown(str(data.get("rationale", ""))), "modules": [s.model_dump() for s in specs]}
@@ -292,6 +340,7 @@ async def reopen_scope(req: ReopenScopeRequest):
             ))
         if not state.module_specs:
             state.module_specs = [ModuleSpec(name=m, platform_core=_is_platform_core(m)) for m in state.modules]
+        state.module_specs = foundation.ensure(state.module_specs)
         state.generation = GenerationProgress()
         state.consistency = None
         state.scope_revision += 1
@@ -319,8 +368,21 @@ async def _generate_flows(state: SessionState) -> SessionState:
     research_context = _research_context(state)
     existing = {f.module for f in state.module_flows}
 
-    for module in state.modules:
-        if module in existing or _is_platform_core(module):
+    # Standard flows need no AI, so they are filled in first and at once.
+    ordered = sorted(state.modules, key=lambda m: 0 if foundation.key_for(state.module_specs, m) else 1)
+    for module in ordered:
+        if module in existing:
+            continue
+        key = foundation.key_for(state.module_specs, module)
+        if key:
+            fresh = await store.get_session(state.session_id) or state
+            if all(f.module != module for f in fresh.module_flows):
+                fresh.module_flows.append(ModuleFlow(
+                    module=module, steps=foundation.flow_steps(key, state.selected_name or "The product"),
+                    status="Approved", standard=True,
+                ))
+            await store.save_session(fresh)
+            state = fresh
             continue
         result = await ai_router.generate(
             ai_router.Feature.TECH_DESIGN_GENERATION,
@@ -373,6 +435,8 @@ async def comment_flow(req: FlowCommentRequest):
     flow = next((f for f in state.module_flows if f.module == req.module), None)
     if not flow:
         raise HTTPException(404, "flow not found for module")
+    if flow.standard:
+        raise HTTPException(409, "standard module flows are fixed by the GiveWings template — tailor the module on Freeze Scope instead")
 
     current = "\n".join(f"{i+1}. {s}" for i, s in enumerate(flow.steps))
     result = await ai_router.generate(
@@ -406,6 +470,8 @@ async def accept_flow(req: FlowModuleRequest):
     flow = next((f for f in state.module_flows if f.module == req.module), None)
     if not flow:
         raise HTTPException(404, "flow not found for module")
+    if flow.standard:
+        raise HTTPException(409, "standard module flows are fixed by the GiveWings template — tailor the module on Freeze Scope instead")
     if flow.revised_steps:
         flow.steps = flow.revised_steps
         flow.revised_steps = None
@@ -422,6 +488,8 @@ async def discard_flow(req: FlowModuleRequest):
     flow = next((f for f in state.module_flows if f.module == req.module), None)
     if not flow:
         raise HTTPException(404, "flow not found for module")
+    if flow.standard:
+        raise HTTPException(409, "standard module flows are fixed by the GiveWings template — tailor the module on Freeze Scope instead")
     flow.revised_steps = None
     flow.status = "Draft"
     await store.save_session(state)
@@ -440,6 +508,8 @@ async def update_flow_steps(req: FlowStepsUpdateRequest):
     flow = next((f for f in state.module_flows if f.module == req.module), None)
     if not flow:
         raise HTTPException(404, "flow not found for module")
+    if flow.standard:
+        raise HTTPException(409, "standard module flows are fixed by the GiveWings template — tailor the module on Freeze Scope instead")
     steps = [s.strip() for s in req.steps if s and s.strip()]
     if not steps:
         raise HTTPException(400, "a flow needs at least one step")
@@ -457,7 +527,7 @@ async def freeze_flows(req: FlowFreezeRequest):
     state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
-    reviewable = [f for f in state.module_flows if not _is_platform_core(f.module)]
+    reviewable = [f for f in state.module_flows if not f.standard and not _is_platform_core(f.module)]
     not_approved = [f.module for f in reviewable if f.status != "Approved"]
     if not_approved:
         raise HTTPException(
@@ -576,11 +646,35 @@ async def retry_generation(req: SessionRequest):
 
 
 async def _draft_requirement(state: SessionState, module: str, req_id: str) -> Requirement:
+    key = foundation.key_for(state.module_specs, module)
+    if key:
+        spec = next(m for m in state.module_specs if m.standard_key == key)
+        public = "; ".join(
+            f"{m.name}: {m.access_note or ACCESS_TEXT[m.access]}"
+            for m in state.module_specs if m.kind != "standard" and m.access in ("public", "mixed")
+        )
+        title, doc = await foundation.tailored_doc(
+            key, state.selected_name or "The product", state.concept_summary or "",
+            spec.tailoring, public, module_map(state, module),
+        )
+        return Requirement(
+            req_id=req_id, module=module, title=title, body=reqdoc.render_text(title, doc),
+            status="Draft", doc=doc, standard_version=foundation.STANDARD_VERSION,
+        )
     flow = next((f for f in state.module_flows if f.module == module), None)
     spec = next((m for m in state.module_specs if m.name == module or f"Platform-Core: {m.name}" == module), None)
     ctx = ""
     if spec and spec.description:
         ctx += f"\nModule responsibility: {spec.description}"
+    if spec:
+        ctx += f"\nWho can use it: {ACCESS_TEXT.get(spec.access, ACCESS_TEXT['signed_in'])}"
+        if spec.access_note:
+            ctx += f" Without signing in, visitors can: {spec.access_note}"
+    ctx += (
+        "\nSign-in, profiles, settings, admin and roles, security, audit and "
+        "health monitoring are covered by the product's standard modules -- "
+        "refer to them by name where relevant; do not specify them here."
+    )
     if flow and flow.steps:
         ctx += (
             "\n\nThis module's key sequence flow was reviewed and approved "

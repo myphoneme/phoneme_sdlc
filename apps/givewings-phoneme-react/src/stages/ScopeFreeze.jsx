@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, Boxes, Check, Link2, Pencil, Plus, RotateCcw, Save, Sparkles, Trash2, Wand2, X } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Boxes, Check, ChevronDown, ChevronRight, Globe, Lock, Pencil, Plus, RotateCcw, Save, ShieldCheck, Sparkles, Trash2, Wand2, X } from "lucide-react";
 import { api } from "../api.js";
+import { ACCESS, STANDARD_HINTS, accessLabel } from "../standard.js";
 
 // Each card carries a client-only _id so edits survive reorders.
 let seq = 0;
@@ -16,17 +17,18 @@ function MergedFrom({ list }) {
 function ModuleView({ m, i, count, busy, onUp, onDown, onEdit, onDelete }) {
   const [confirming, setConfirming] = useState(false);
   return (
-    <li className={"module-edit" + (m.platform_core ? " core" : "")}>
+    <li className="module-edit">
       <span className="module-num">{i + 1}</span>
       <div className="module-fields">
         <div className="module-top">
-          <span className="module-icon" aria-hidden="true">{m.platform_core ? <Link2 size={16} /> : <Boxes size={16} />}</span>
+          <span className="module-icon" aria-hidden="true"><Boxes size={16} /></span>
           <h3 className="module-view-name">{m.name}</h3>
-          <span className={m.platform_core ? "chip" : "chip good"}>{m.platform_core ? "Platform-Core (shared)" : "Built for this product"}</span>
+          <span className={"chip access-chip " + (m.access || "signed_in")}>{m.access && m.access !== "signed_in" ? <Globe size={12} aria-hidden="true" /> : <Lock size={12} aria-hidden="true" />} {accessLabel(m.access)}</span>
         </div>
         {m.description
           ? <p className="module-view-desc">{m.description}</p>
           : <p className="muted small">No description yet — click Edit to describe what this module is responsible for.</p>}
+        {m.access && m.access !== "signed_in" && m.access_note && <p className="access-note"><b>Without signing in:</b> {m.access_note}</p>}
         <MergedFrom list={m.merged_from} />
         {confirming && (
           <div className="inline-confirm" role="alert">
@@ -48,11 +50,11 @@ function ModuleView({ m, i, count, busy, onUp, onDown, onEdit, onDelete }) {
 
 function ModuleForm({ d, i, isNew, busy, error, onChange, onSave, onCancel }) {
   return (
-    <li className={"module-edit editing" + (d.platform_core ? " core" : "")}>
+    <li className="module-edit editing">
       <span className="module-num">{i + 1}</span>
       <div className="module-fields">
         <div className="module-top">
-          <span className="module-icon" aria-hidden="true">{d.platform_core ? <Link2 size={16} /> : <Boxes size={16} />}</span>
+          <span className="module-icon" aria-hidden="true"><Boxes size={16} /></span>
           <input className="module-name-input" autoFocus={isNew} value={d.name} placeholder="Module name" aria-label={`Module ${i + 1} name`}
             onChange={(e) => onChange({ name: e.target.value })} onKeyDown={(e) => e.key === "Enter" && onSave()} />
         </div>
@@ -61,11 +63,21 @@ function ModuleForm({ d, i, isNew, busy, error, onChange, onSave, onCancel }) {
           onChange={(e) => onChange({ description: e.target.value })} />
         <MergedFrom list={d.merged_from} />
         <div className="module-foot">
-          <div className="seg" role="radiogroup" aria-label={`Module ${i + 1} type`}>
-            <button type="button" role="radio" aria-checked={!d.platform_core} className={!d.platform_core ? "on" : ""} onClick={() => onChange({ platform_core: false })}><Boxes size={13} /> Built for this product</button>
-            <button type="button" role="radio" aria-checked={!!d.platform_core} className={d.platform_core ? "on" : ""} onClick={() => onChange({ platform_core: true })} title="Shared sign-in, security or gateway provided by the platform — not drafted here"><Link2 size={13} /> Platform-Core (shared)</button>
+          <span className="foot-label">Who can use it?</span>
+          <div className="seg" role="radiogroup" aria-label={`Module ${i + 1} access`}>
+            {ACCESS.map((a) => (
+              <button key={a.value} type="button" role="radio" aria-checked={(d.access || "signed_in") === a.value} title={a.hint}
+                className={(d.access || "signed_in") === a.value ? "on" : ""} onClick={() => onChange({ access: a.value })}>
+                {a.value === "signed_in" ? <Lock size={13} /> : <Globe size={13} />} {a.label}
+              </button>
+            ))}
           </div>
         </div>
+        {d.access && d.access !== "signed_in" && (
+          <input className="access-note-input" value={d.access_note || ""} aria-label="What visitors can do without signing in"
+            placeholder={d.access === "public" ? "What is public? e.g. landing page, monthly contest, free caption tool" : "What can visitors try without an account? e.g. repurpose one link for free"}
+            onChange={(e) => onChange({ access_note: e.target.value })} />
+        )}
         {error && <p className="field-error" role="alert">{error}</p>}
       </div>
       <div className="module-tools">
@@ -76,10 +88,50 @@ function ModuleForm({ d, i, isNew, busy, error, onChange, onSave, onCancel }) {
   );
 }
 
+function StandardCard({ m, busy, onSave }) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(m.tailoring || "");
+  useEffect(() => { if (!editing) setText(m.tailoring || ""); }, [m.tailoring, editing]);
+  return (
+    <li className={"std-card" + (editing ? " editing" : "")}>
+      <div className="std-head">
+        <span className="module-icon std" aria-hidden="true"><ShieldCheck size={16} /></span>
+        <div className="std-title">
+          <strong>{m.name}</strong>
+          <span>{m.description}</span>
+        </div>
+        {!editing && (
+          <button type="button" className="icon-btn" title="Tailor for this product" aria-label={`Tailor ${m.name}`} disabled={busy} onClick={() => setEditing(true)}><Pencil size={15} /></button>
+        )}
+      </div>
+      {editing ? (
+        <div className="std-edit">
+          <label className="foot-label" htmlFor={`tailor-${m.standard_key}`}>Tailor for this product (optional)</label>
+          <textarea id={`tailor-${m.standard_key}`} rows={3} value={text} placeholder={STANDARD_HINTS[m.standard_key]} onChange={(e) => setText(e.target.value)} />
+          <div className="requirement-actions">
+            <button type="button" className="btn-secondary sm" disabled={busy} onClick={() => { setText(m.tailoring || ""); setEditing(false); }}><X size={13} /> Cancel</button>
+            <button type="button" className="btn-primary sm-primary" disabled={busy} onClick={async () => { if (await onSave(text.trim())) setEditing(false); }}><Save size={13} /> Save</button>
+          </div>
+        </div>
+      ) : m.tailoring ? (
+        <p className="std-tailoring"><b>Tailored:</b> {m.tailoring}</p>
+      ) : (
+        <button type="button" className="link-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Uses the GiveWings standard as-is
+        </button>
+      )}
+      {open && !editing && !m.tailoring && <p className="muted small std-more">Click the pencil to add product specifics — for example {STANDARD_HINTS[m.standard_key]?.replace(/^e\.g\. /, "")}.</p>}
+    </li>
+  );
+}
+
 export default function ScopeFreeze({ session, setSession }) {
   const sid = session.session_id;
   const DRAFT_KEY = `gw_scope_drafts_${sid}`;
-  const [mods, setMods] = useState(() => (session.module_specs || []).map(withId)); // saved list
+  const isStd = (m) => m.kind === "standard";
+  const standards = (session.module_specs || []).filter(isStd);
+  const [mods, setMods] = useState(() => (session.module_specs || []).filter((m) => !isStd(m)).map(withId)); // saved product modules
   const [drafts, setDrafts] = useState({}); // _id -> draft for cards being edited
   const [newIds, setNewIds] = useState({}); // _id -> true for never-saved cards
   const [cardErr, setCardErr] = useState({});
@@ -100,13 +152,16 @@ export default function ScopeFreeze({ session, setSession }) {
 
   // First visit: ask the AI for a module breakdown.
   useEffect(() => {
-    if (!session.module_specs?.length) {
-      setLoading(true);
-      api.freeze(sid)
-        .then((s) => { setSession(s); setMods((s.module_specs || []).map(withId)); })
-        .catch((e) => setError(e.message))
-        .finally(() => setLoading(false));
-    }
+    // Always ask the server: it drafts the breakdown on first visit and adds
+    // the GiveWings standard modules to scopes created before they existed.
+    if (!session.module_specs?.length) setLoading(true);
+    api.freeze(sid)
+      .then((s) => {
+        setSession(s);
+        if (!session.module_specs?.length || !(session.module_specs || []).some(isStd)) setMods((s.module_specs || []).filter((m) => !isStd(m)).map(withId));
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
     // Offer to restore unsaved card edits from an earlier visit.
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
@@ -137,7 +192,7 @@ export default function ScopeFreeze({ session, setSession }) {
     setBusy(true);
     setError(null);
     try {
-      const s = await api.saveModules(sid, list.map(strip));
+      const s = await api.saveModules(sid, [...standards, ...list.map(strip)]);
       setMods(list);
       setSession(s);
       setSavedAt(new Date());
@@ -178,6 +233,22 @@ export default function ScopeFreeze({ session, setSession }) {
   // Saved list only (drafts that were never saved are excluded from the server copy).
   const savedOnly = (list) => list.filter((m) => !newIds[m._id]);
 
+  async function saveTailoring(key, tailoring) {
+    setBusy(true);
+    setError(null);
+    try {
+      const std = standards.map((m) => (m.standard_key === key ? { ...m, tailoring } : m));
+      setSession(await api.saveModules(sid, [...std, ...mods.filter((m) => !newIds[m._id]).map(strip)]));
+      setSavedAt(new Date());
+      return true;
+    } catch (e) {
+      setError(`Couldn't save to the server: ${e.message}`);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function move(i, dir) {
     const j = i + dir;
     if (j < 0 || j >= mods.length) return;
@@ -193,7 +264,7 @@ export default function ScopeFreeze({ session, setSession }) {
   }
 
   const add = () => {
-    const m = withId({ name: "", description: "", platform_core: false });
+    const m = withId({ name: "", description: "", access: "signed_in", access_note: "" });
     setMods((x) => [...x, m]);
     setNewIds((x) => ({ ...x, [m._id]: true }));
     setDrafts((d) => ({ ...d, [m._id]: { ...m } }));
@@ -212,7 +283,7 @@ export default function ScopeFreeze({ session, setSession }) {
   }
 
   async function useProposal() {
-    const list = proposal.modules.map(withId);
+    const list = proposal.modules.filter((m) => !isStd(m)).map(withId);
     if (await persist(list)) {
       setDrafts({}); setNewIds({}); setCardErr({});
       setProposal(null);
@@ -226,7 +297,7 @@ export default function ScopeFreeze({ session, setSession }) {
       const match = _orig && list.find((m) => m.name === _orig);
       if (match && !_new) d[match._id] = { ...draft, _id: match._id };
       else {
-        const m = withId({ name: "", description: "", platform_core: false });
+        const m = withId({ name: "", description: "", access: "signed_in", access_note: "" });
         list = [...list, m];
         nw[m._id] = true;
         d[m._id] = { ...draft, _id: m._id };
@@ -249,9 +320,7 @@ export default function ScopeFreeze({ session, setSession }) {
     }
   }
 
-  const live = savedOnly(mods);
-  const product = live.filter((m) => !m.platform_core);
-  const core = live.filter((m) => m.platform_core);
+  const product = savedOnly(mods);
 
   return (
     <div className="scope">
@@ -302,9 +371,9 @@ export default function ScopeFreeze({ session, setSession }) {
             <div className="proposal">
               {proposal.rationale && <p className="lead">{proposal.rationale}</p>}
               <ol className="proposal-list">
-                {proposal.modules.map((m, i) => (
-                  <li key={i} className={m.platform_core ? "core" : ""}>
-                    <strong>{m.name}</strong>{m.platform_core && <span className="chip">Platform-Core</span>}
+                {proposal.modules.filter((m) => !isStd(m)).map((m, i) => (
+                  <li key={i}>
+                    <strong>{m.name}</strong> <span className="chip">{accessLabel(m.access)}</span>
                     {m.description && <p>{m.description}</p>}
                     <MergedFrom list={m.merged_from} />
                   </li>
@@ -314,29 +383,23 @@ export default function ScopeFreeze({ session, setSession }) {
                 <button className="btn-secondary" onClick={() => setProposal(null)}>Dismiss</button>
                 <button className="btn-primary" disabled={busy} onClick={useProposal}>Use this proposal <ArrowRight size={15} /></button>
               </div>
-              {editing > 0 && <p className="muted small">Using the proposal replaces the list and closes the {editing} card{editing > 1 ? "s" : ""} you're editing.</p>}
+              {editing > 0 && <p className="muted small">Using the proposal replaces the product modules (standard modules stay) and closes the {editing} card{editing > 1 ? "s" : ""} you're editing.</p>}
             </div>
           )}
         </section>
       )}
 
-      {mods.length > 0 && (
+      {!loading && (
         <div className="review-summary">
-          <span><strong>{product.length}</strong> product module{product.length === 1 ? "" : "s"} · <strong>{core.length}</strong> Platform-Core (shared, not rebuilt)</span>
-          <span className="muted small">Each product module gets its own flow and requirement document.</span>
+          <span><strong>{product.length}</strong> product module{product.length === 1 ? "" : "s"} + <strong>{standards.length}</strong> standard = <strong>{product.length + standards.length}</strong> BRD/PRD documents</span>
+          <span className="muted small">Product modules get their own flow design; standard modules use pre-approved GiveWings flows.</span>
         </div>
       )}
 
-      {live.length > 0 && product.length === 0 && (
-        <div className="callout warn-callout">
-          <AlertTriangle size={20} aria-hidden="true" />
-          <div>
-            <strong>Every module is marked Platform-Core</strong>
-            <p>Platform-Core is only for shared sign-in, security and gateway features the platform already provides. Edit the modules this product builds itself and set them to <b>Built for this product</b>.</p>
-          </div>
-        </div>
-      )}
-
+      <div className="section-head">
+        <h3>Product modules</h3>
+        <p className="muted small">What makes this product unique. Keep a small product to 3–4 modules, and say who can use each one.</p>
+      </div>
       <ol className="module-editor">
         {mods.map((m, i) => (drafts[m._id]
           ? <ModuleForm key={m._id} d={drafts[m._id]} i={i} isNew={!!newIds[m._id]} busy={busy} error={cardErr[m._id]}
@@ -349,13 +412,25 @@ export default function ScopeFreeze({ session, setSession }) {
         <button type="button" className="add-row" disabled={busy} onClick={add}><Plus size={16} /> Add a module</button>
       )}
 
+      {standards.length > 0 && (
+        <section className="std-section">
+          <div className="section-head">
+            <h3><ShieldCheck size={17} aria-hidden="true" /> Standard modules <span className="chip">GiveWings standard v1.0</span></h3>
+            <p className="muted small">Included in every product and shipped in its own code, so it runs independently wherever it is hosted. Written from GiveWings templates — tailor them to this product if needed. The health agent reports to the GiveWings Health Dashboard once the owner connects it.</p>
+          </div>
+          <ul className="std-grid">
+            {standards.map((m) => <StandardCard key={m.standard_key} m={m} busy={busy || loading} onSave={(t) => saveTailoring(m.standard_key, t)} />)}
+          </ul>
+        </section>
+      )}
+
       {error && <div className="error-banner" role="alert">{error}</div>}
 
       <div className="sticky-actions">
         <span className="muted">
           {editing ? `${editing} module${editing > 1 ? "s" : ""} still being edited — save or cancel first.`
             : busy ? "Saving…"
-            : product.length === 0 ? "Mark at least one module as Built for this product."
+            : product.length === 0 ? "Add at least one product module to continue."
             : savedAt ? <><Check size={14} /> All changes saved {savedAt.toLocaleTimeString()}. Freeze when you're happy.</>
             : "Every module is saved. Freeze when you're happy with the list."}
         </span>

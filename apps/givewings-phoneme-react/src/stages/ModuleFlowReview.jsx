@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, PenLine, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, PenLine, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { api } from "../api.js";
 import { FlowStepText } from "./RequirementDoc.jsx";
 
@@ -144,11 +144,15 @@ export default function ModuleFlowReview({ session, setSession }) {
   const [error, setError] = useState(null);
 
   const reviewable = (session?.module_flows || []).filter(
-    (f) => !f.module.toLowerCase().startsWith("platform-core")
+    (f) => !f.standard && !f.module.toLowerCase().startsWith("platform-core")
   );
+  const standardFlows = (session?.module_flows || []).filter((f) => f.standard);
   const allApproved = reviewable.length > 0 && reviewable.every((f) => f.status === "Approved");
 
-  const expected = (session?.modules || []).filter((m) => !m.toLowerCase().startsWith("platform-core")).length;
+  const specs = session?.module_specs || [];
+  const expected = specs.length
+    ? specs.filter((m) => m.kind !== "standard").length
+    : (session?.modules || []).filter((m) => !m.toLowerCase().startsWith("platform-core")).length;
 
   useEffect(() => {
     if (session && reviewable.length < expected) {
@@ -212,6 +216,24 @@ export default function ModuleFlowReview({ session, setSession }) {
           <FlowCard key={f.module} sessionId={session.session_id} flow={f} onChange={handleChange} />
         ))}
       </div>
+
+      {standardFlows.length > 0 && (
+        <details className="std-flows">
+          <summary><ShieldCheck size={16} aria-hidden="true" /> <strong>{standardFlows.length} standard module{standardFlows.length === 1 ? "" : "s"}</strong> <span className="muted small">— pre-approved GiveWings standard flows, tailored in the BRD/PRD. Click to view.</span></summary>
+          <div className="requirement-feed">
+            {standardFlows.map((f) => (
+              <div key={f.module} className="requirement-card approved">
+                <div className="requirement-header">
+                  <span className="req-title">{f.module}</span>
+                  <span className="req-count">{f.steps.length} steps</span>
+                  <span className="chip">Standard</span>
+                </div>
+                <ol className="flow-step-list">{f.steps.map((s, i) => <li key={i}><FlowStepText text={s} /></li>)}</ol>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
 
       <div className="sticky-actions">
         <span className="muted">{allApproved ? "All flows approved — ready to draft requirements." : "Approve every module flow to continue."}</span>

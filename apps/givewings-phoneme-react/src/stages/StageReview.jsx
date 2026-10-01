@@ -1,4 +1,5 @@
-import { Boxes, Link2, Sparkles } from "lucide-react";
+import { Boxes, ShieldCheck, Sparkles } from "lucide-react";
+import { accessLabel } from "../standard.js";
 import { FlowStepText } from "./RequirementDoc.jsx";
 import { ResearchReportView } from "./ResearchCard.jsx";
 import { IdentitySummary } from "./IdentityStudio.jsx";
@@ -79,23 +80,36 @@ function IdentityReview({ session }) {
 function ScopeReview({ session, setSession, requirements }) {
   const specs = session.module_specs?.length
     ? session.module_specs
-    : (session.modules || []).map((m) => ({ name: m, description: "", platform_core: m.toLowerCase().startsWith("platform-core") }));
+    : (session.modules || []).map((m) => ({ name: m, description: "", kind: "business" }));
   if (!specs.length) return <Empty>No modules recorded.</Empty>;
+  const product = specs.filter((m) => m.kind !== "standard");
+  const standard = specs.filter((m) => m.kind === "standard");
   return (
     <div className="review-stack">
     <div className="scope-review-bar">
-      <span className="muted">{specs.filter((m) => !m.platform_core).length} product modules were frozen. Too many, or overlapping?</span>
+      <span className="muted">{product.length} product module{product.length === 1 ? " was" : "s were"} frozen{standard.length ? `, plus ${standard.length} GiveWings standard modules` : ""}. Too many, or overlapping?</span>
       <ReopenScope session={session} setSession={setSession} requirements={requirements} />
     </div>
     <ol className="module-grid review">
-      {specs.map((m, i) => (
-        <li key={i} className={"module-tile" + (m.platform_core ? " core" : "")}>
-          <span className="module-icon" aria-hidden="true">{m.platform_core ? <Link2 size={16} /> : <Boxes size={16} />}</span>
+      {product.map((m, i) => (
+        <li key={i} className="module-tile">
+          <span className="module-icon" aria-hidden="true"><Boxes size={16} /></span>
           <span className="module-name">{m.name}{m.description && <small>{m.description}</small>}</span>
-          {m.platform_core && <span className="chip">Platform-Core</span>}
+          {m.access && m.access !== "signed_in" && <span className="chip">{accessLabel(m.access)}</span>}
         </li>
       ))}
     </ol>
+    {standard.length > 0 && (
+      <ul className="module-grid review">
+        {standard.map((m) => (
+          <li key={m.name} className="module-tile core">
+            <span className="module-icon" aria-hidden="true"><ShieldCheck size={16} /></span>
+            <span className="module-name">{m.name}{m.tailoring && <small>Tailored: {m.tailoring}</small>}</span>
+            <span className="chip">Standard</span>
+          </li>
+        ))}
+      </ul>
+    )}
     </div>
   );
 }

@@ -578,3 +578,38 @@ button.journey-link:hover { background: #faf6f2; }
 .field-error { margin: 8px 0 0; font-size: 12.5px; font-weight: 700; color: #b42318; }
 .module-edit .module-top .chip { flex-shrink: 0; }
 .module-edit.editing .module-tools { flex-direction: column; align-items: stretch; }
+
+/* --- Standard modules & access (2026-10-01) --- */
+.section-head { margin: 22px 0 10px; }
+.section-head h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 4px; font: 800 16px Manrope, sans-serif; letter-spacing: -.02em; color: #171717; }
+.section-head h3 svg { color: #b3530a; }
+.section-head p { margin: 0; max-width: 760px; }
+.foot-label { font-size: 12px; font-weight: 800; color: #3d3f44; margin-right: 4px; }
+.access-chip { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.access-chip.signed_in { background: #f1efec; color: #3d3f44; }
+.access-chip.public, .access-chip.mixed { background: #e8f1ff; color: #1f4f99; }
+.access-note { margin: 6px 0 0; font-size: 13px; color: #3d3f44; }
+.access-note-input { width: 100%; margin-top: 8px; height: 38px; padding: 0 12px; border: 1px solid #e5e2dd; border-radius: 10px; font: 500 13.5px "DM Sans", sans-serif; background: #fff; }
+.access-note-input:focus { outline: 2px solid #ff7200; outline-offset: 1px; }
+.std-section { margin-top: 26px; padding: 18px; border: 1px solid #e5e2dd; border-radius: 16px; background: #fbfaf8; }
+.std-section .section-head { margin-top: 0; }
+.std-grid { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.std-card { padding: 14px; border: 1px solid #e5e2dd; border-radius: 12px; background: #fff; }
+.std-card.editing { border-color: #ffb27a; box-shadow: 0 0 0 4px #ff72001a; }
+.std-head { display: flex; align-items: flex-start; gap: 10px; }
+.module-icon.std { background: #eaf7ef; color: #187e4e; }
+.std-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.std-title strong { font: 800 14.5px Manrope, sans-serif; color: #171717; }
+.std-title span { font-size: 13px; line-height: 1.5; color: #6b6e74; }
+.std-edit { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.std-edit textarea { width: 100%; padding: 10px 12px; border: 1px solid #e5e2dd; border-radius: 10px; font: 500 13.5px "DM Sans", sans-serif; resize: vertical; }
+.std-tailoring { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: #fff4ea; font-size: 13px; color: #3d3f44; }
+.link-btn { margin-top: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; font: 700 12.5px "DM Sans", sans-serif; color: #b3530a; cursor: pointer; }
+.std-more { margin: 6px 0 0; }
+.std-flows { margin: 18px 0; padding: 12px 14px; border: 1px solid #e5e2dd; border-radius: 12px; background: #fbfaf8; }
+.std-flows summary { cursor: pointer; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.std-flows summary svg { color: #187e4e; }
+.std-flows .requirement-feed { margin-top: 12px; }
+.std-mini { margin-left: 6px; font-size: 10.5px; padding: 1px 6px; }
+.std-tag { color: #187e4e; font-weight: 700; }
+@media (max-width: 760px) { .std-grid { grid-template-columns: minmax(0, 1fr); } .module-foot { flex-wrap: wrap; } }

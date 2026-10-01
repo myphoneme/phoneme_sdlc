@@ -1,6 +1,3 @@
-# End-to-end check of the wizard API with the AI tier stubbed.
-# Run from apps/orchestrator:  python tests/test_wizard_flow.py
-import sys, pathlib; sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import asyncio, json, re
 import httpx
 from app import ai_router, main
@@ -96,19 +93,31 @@ async def run():
         print("sanitized svg:", logos[0]["svg"][:160])
         s = await post("/api/identity/logo", {"session_id": sid, "logo_id": logos[0]["id"]})
         s = await post("/api/identity/complete", {"session_id": sid}); assert s["stage"] == "freeze"
-        s = await post("/api/wizard/freeze", {"session_id": sid}); assert s["stage"] == "freeze" and len(s["module_specs"]) == 3, s
+        s = await post("/api/wizard/freeze", {"session_id": sid}); assert s["stage"] == "freeze" and len(s["module_specs"]) == 6, s
+        biz = [m["name"] for m in s["module_specs"] if m["kind"] == "business"]
+        assert biz == ["Ingestion Vault", "Catalogue"], biz   # Auth & Identity replaced by standard modules
+        assert s["modules"][0] == "Sign-in & Account" and s["modules"][-1] == "Security, Audit & Health"
         print("modules:", s["modules"])
-        specs = s["module_specs"]; specs.append({"name": "Repurpose Studio", "description": "text/image/video", "platform_core": False}); specs[1]["name"] = "Genre & Topic Catalogue"
+        specs = s["module_specs"]; specs.append({"name": "Repurpose Studio", "description": "text/image/video", "access": "mixed", "access_note": "Try one free repurpose"}); specs[2]["name"] = "Genre & Topic Catalogue"
+        specs[0]["tailoring"] = "Sign in with WhatsApp OTP"
+        await post("/api/wizard/modules/save", {"session_id": sid, "modules": specs + [{"name": "Profile & Settings"}]}, 400)
         s = await post("/api/wizard/modules/save", {"session_id": sid, "modules": specs})
-        await post("/api/wizard/modules/save", {"session_id": sid, "modules": specs + [specs[0]]}, 400)
+        await post("/api/wizard/modules/save", {"session_id": sid, "modules": specs + [specs[1]]}, 400)
+        assert s["module_specs"][0]["tailoring"] == "Sign in with WhatsApp OTP"
+        s = await post("/api/wizard/modules/save", {"session_id": sid, "modules": [m for m in specs if m.get("kind") != "standard"]})
+        assert s["module_specs"][0]["tailoring"] == "Sign in with WhatsApp OTP" and len(s["module_specs"]) == 7, s["modules"]
         s = await post("/api/wizard/modules/confirm", {"session_id": sid}); assert s["stage"] == "flow"
-        s = await post("/api/wizard/flows/generate", {"session_id": sid}); assert len(s["module_flows"]) == 3, [f["module"] for f in s["module_flows"]]
-        m = s["module_flows"][0]["module"]
+        s = await post("/api/wizard/flows/generate", {"session_id": sid}); assert len(s["module_flows"]) == 7, [f["module"] for f in s["module_flows"]]
+        std = [f for f in s["module_flows"] if f["standard"]]
+        assert len(std) == 4 and all(f["status"] == "Approved" for f in std)
+        await post("/api/wizard/flows/update", {"session_id": sid, "module": "Sign-in & Account", "steps": ["x"]}, 409)
+        m = "Ingestion Vault"
         s = await post("/api/wizard/flows/update", {"session_id": sid, "module": m, "steps": ["A", " ", "B edited", "C new"]})
-        assert s["module_flows"][0]["steps"] == ["A", "B edited", "C new"]
+        assert next(f for f in s["module_flows"] if f["module"] == m)["steps"] == ["A", "B edited", "C new"]
         await post("/api/wizard/flows/freeze", {"session_id": sid}, 400)
         for f in s["module_flows"]:
-            s = await post("/api/wizard/flows/accept", {"session_id": sid, "module": f["module"]})
+            if not f["standard"]:
+                s = await post("/api/wizard/flows/accept", {"session_id": sid, "module": f["module"]})
         s = await post("/api/wizard/flows/freeze", {"session_id": sid}); assert s["stage"] == "generating"
         s, s2 = await asyncio.gather(post("/api/wizard/generate", {"session_id": sid}), post("/api/wizard/generate", {"session_id": sid}))
         print("gen start:", s["generation"]["status"], s["generation"]["total"])
@@ -118,7 +127,7 @@ async def run():
             g = s["generation"]
             if g["status"] != "running": break
         print("gen end:", g["status"], g["done"], "/", g["total"], [(i["module"], i["status"], i["error"]) for i in g["items"]])
-        assert g["status"] == "failed" and g["done"] == 3
+        assert g["status"] == "failed" and g["done"] == 6
         s = await post("/api/wizard/generate/retry", {"session_id": sid})
         for _ in range(40):
             await asyncio.sleep(0.15)
@@ -127,7 +136,10 @@ async def run():
         g = s["generation"]
         reqs = (await c.get(f"/api/brdprd/{sid}/requirements")).json()
         print("after retry:", g["status"], g["done"], "/", g["total"], "stage", s["stage"], "reqs", [r["req_id"] for r in reqs])
-        assert g["status"] == "done" and s["stage"] == "manager" and len(reqs) == 4
+        assert g["status"] == "done" and s["stage"] == "manager" and len(reqs) == 7
+        sa = next(r for r in reqs if r["module"] == "Sign-in & Account")
+        assert sa["standard_version"] == "1.0" and sa["req_id"] == "RELA-001" and len(sa["doc"]["acceptance_criteria"]) == 7, sa
+        assert next(r for r in reqs if r["module"] == "Ingestion Vault")["standard_version"] == ""
         print("drafting calls:", calls.count("brd_prd_drafting"))
         r1 = next(r for r in reqs if r["module"] == "Ingestion Vault")
         txt = r1["body"]
@@ -167,18 +179,19 @@ async def run():
         s = await post("/api/wizard/reopen-scope", {"session_id": sid, "reason": "too many modules"})
         assert s["stage"] == "freeze" and s["scope_revision"] == 1 and s["consistency"] is None
         arch = s["requirement_archive"][0]
-        assert len(arch["requirements"]) == 6 and any(r["status"] == "Frozen" for r in arch["requirements"]), [r["req_id"] for r in arch["requirements"]]
+        assert len(arch["requirements"]) == 9 and any(r["status"] == "Frozen" for r in arch["requirements"]), [r["req_id"] for r in arch["requirements"]]
         assert (await c.get(f"/api/brdprd/{sid}/requirements")).json() == []
         prop = await post("/api/wizard/modules/consolidate", {"session_id": sid, "instruction": "small project, 2 modules", "target": 2})
-        assert prop["modules"][0]["merged_from"] == ["Ingestion Vault", "Genre & Topic Catalogue"], prop
+        assert prop["modules"][0]["merged_from"] == ["Ingestion Vault", "Genre & Topic Catalogue"] and len(prop["modules"]) == 2, prop
         s = await post("/api/wizard/modules/save", {"session_id": sid, "modules": prop["modules"]})
         s = await post("/api/wizard/modules/confirm", {"session_id": sid})
         flows = {f["module"]: f["status"] for f in s["module_flows"]}
-        assert flows == {"Repurpose Studio": "Draft"}, flows   # kept flow reset to Draft, removed ones dropped
+        assert {k: v for k, v in flows.items() if k not in ("Sign-in & Account", "Profile & Settings", "Admin Dashboard & Roles", "Security, Audit & Health")} == {"Repurpose Studio": "Draft"} and flows["Sign-in & Account"] == "Approved", flows   # kept flow reset to Draft, removed ones dropped
         s = await post("/api/wizard/flows/generate", {"session_id": sid})
-        assert sorted(f["module"] for f in s["module_flows"]) == ["Capture & Catalogue", "Repurpose Studio"]
+        assert sorted(f["module"] for f in s["module_flows"] if not f["standard"]) == ["Capture & Catalogue", "Repurpose Studio"]
         for f in s["module_flows"]:
-            s = await post("/api/wizard/flows/accept", {"session_id": sid, "module": f["module"]})
+            if not f["standard"]:
+                s = await post("/api/wizard/flows/accept", {"session_id": sid, "module": f["module"]})
         s = await post("/api/wizard/flows/freeze", {"session_id": sid})
         s = await post("/api/wizard/generate", {"session_id": sid})
         for _ in range(60):
@@ -187,6 +200,6 @@ async def run():
             if s["generation"]["status"] != "running": break
         reqs = (await c.get(f"/api/brdprd/{sid}/requirements")).json()
         print("after redefine:", s["generation"]["status"], [(r["req_id"], r["module"]) for r in reqs])
-        assert s["stage"] == "manager" and len(reqs) == 3
+        assert s["stage"] == "manager" and len(reqs) == 6
         print("ALL OK")
 asyncio.run(run())

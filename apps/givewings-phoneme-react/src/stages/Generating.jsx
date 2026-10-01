@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, CircleAlert, Clock, FileText, Link2, RotateCcw } from "lucide-react";
+import { ArrowRight, Check, CircleAlert, Clock, FileText, RotateCcw, ShieldCheck } from "lucide-react";
+import { STANDARD_NAMES } from "../standard.js";
 import { api } from "../api.js";
 
 const POLL_MS = 3000;
@@ -27,14 +28,14 @@ export function GenerationBoard({ generation, showErrors = true }) {
       </p>
       <ol className="gen-list">
         {g.items.map((it) => {
-          const core = it.module.toLowerCase().startsWith("platform-core");
+          const core = STANDARD_NAMES.has(it.module) || it.module.toLowerCase().startsWith("platform-core");
           return (
             <li key={it.module} className={`gen-item ${it.status}`}>
               <span className="gen-icon" aria-hidden="true">
                 {it.status === "done" ? <Check size={14} strokeWidth={3} /> : it.status === "drafting" ? <span className="spinner sm" /> : it.status === "failed" ? <CircleAlert size={15} /> : <Clock size={14} />}
               </span>
               <span className="req-id">{it.req_id}</span>
-              <span className="gen-module">{core ? <Link2 size={13} aria-hidden="true" /> : <FileText size={13} aria-hidden="true" />} {it.module}</span>
+              <span className="gen-module">{core ? <ShieldCheck size={13} aria-hidden="true" /> : <FileText size={13} aria-hidden="true" />} {it.module}{STANDARD_NAMES.has(it.module) && <span className="chip std-mini">Standard</span>}</span>
               <span className={`gen-status ${it.status}`}>{{ done: "Drafted", drafting: "Drafting…", failed: "Failed", queued: "Queued", skipped: "Skipped" }[it.status] || it.status}</span>
               {showErrors && it.error && <span className="gen-error">{it.error}</span>}
             </li>

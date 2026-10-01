@@ -57,6 +57,7 @@ class ModuleFlow(BaseModel):
     steps: list[str] = []
     revised_steps: Optional[list[str]] = None
     status: str = "Draft"  # Draft -> Revised (pending review) -> Approved
+    standard: bool = False  # pre-approved GiveWings standard flow (read-only)
 
 
 class ConceptBrief(BaseModel):
@@ -82,8 +83,18 @@ class ModuleSpec(BaseModel):
     Freeze Scope screen before any flow is drafted."""
     name: str
     description: str = ""
-    platform_core: bool = False
+    platform_core: bool = False  # legacy (pre 2026-10-01); see foundation.ensure
     merged_from: list[str] = []  # set when an AI consolidation proposed it
+    # 2026-10-01: every product is self-contained. "standard" = GiveWings
+    # standard module (sign-in, profile, admin, security/health) written
+    # from a versioned template; "business" = specific to this product.
+    kind: str = "business"
+    standard_key: str = ""
+    tailoring: str = ""  # BA notes that tailor a standard module
+    # Who can use a business module: signed_in | public | mixed (public
+    # trial/marketing part, full feature after sign-in).
+    access: str = "signed_in"
+    access_note: str = ""
 
 
 class DomainCheck(BaseModel):
@@ -254,6 +265,7 @@ class Requirement(BaseModel):
     revised_doc: Optional[RequirementDoc] = None
     revised_title: Optional[str] = None
     status_before_revision: Optional[str] = None
+    standard_version: str = ""  # set for GiveWings standard modules
 
 
 class CommentRequest(BaseModel):
