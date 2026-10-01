@@ -14,6 +14,17 @@ function MergedFrom({ list }) {
   return <div className="merged-from"><span>Replaces</span>{list.map((x) => <span key={x} className="chip">{x}</span>)}</div>;
 }
 
+export function Boundary({ m }) {
+  if (!m.starts_when && !m.outcome) return <p className="boundary missing">No boundary yet — add where this module starts and the outcome it ends with, so its flow stays inside it.</p>;
+  return (
+    <div className="boundary">
+      <span><b>Starts when</b>{m.starts_when || "—"}</span>
+      <ArrowRight size={14} aria-hidden="true" />
+      <span><b>Outcome</b>{m.outcome || "—"}</span>
+    </div>
+  );
+}
+
 function ModuleView({ m, i, count, busy, onUp, onDown, onEdit, onDelete }) {
   const [confirming, setConfirming] = useState(false);
   return (
@@ -28,6 +39,7 @@ function ModuleView({ m, i, count, busy, onUp, onDown, onEdit, onDelete }) {
         {m.description
           ? <p className="module-view-desc">{m.description}</p>
           : <p className="muted small">No description yet — click Edit to describe what this module is responsible for.</p>}
+        <Boundary m={m} />
         {m.access && m.access !== "signed_in" && m.access_note && <p className="access-note"><b>Without signing in:</b> {m.access_note}</p>}
         <MergedFrom list={m.merged_from} />
         {confirming && (
@@ -61,6 +73,12 @@ function ModuleForm({ d, i, isNew, busy, error, onChange, onSave, onCancel }) {
         <textarea rows={rowsFor(d.description)} value={d.description || ""} aria-label={`Module ${i + 1} description`}
           placeholder="What is this module responsible for? Describe it in your own words — this guides its flow and requirement document."
           onChange={(e) => onChange({ description: e.target.value })} />
+        <div className="boundary-fields">
+          <label><span>Starts when</span>
+            <input value={d.starts_when || ""} placeholder="e.g. A user sets up their vault" aria-label={`Module ${i + 1} starts when`} onChange={(e) => onChange({ starts_when: e.target.value })} /></label>
+          <label><span>Outcome (ends with)</span>
+            <input value={d.outcome || ""} placeholder="e.g. Every forwarded item lands in the vault inbox" aria-label={`Module ${i + 1} outcome`} onChange={(e) => onChange({ outcome: e.target.value })} /></label>
+        </div>
         <MergedFrom list={d.merged_from} />
         <div className="module-foot">
           <span className="foot-label">Who can use it?</span>
@@ -264,7 +282,7 @@ export default function ScopeFreeze({ session, setSession }) {
   }
 
   const add = () => {
-    const m = withId({ name: "", description: "", access: "signed_in", access_note: "" });
+    const m = withId({ name: "", description: "", access: "signed_in", access_note: "", starts_when: "", outcome: "" });
     setMods((x) => [...x, m]);
     setNewIds((x) => ({ ...x, [m._id]: true }));
     setDrafts((d) => ({ ...d, [m._id]: { ...m } }));
@@ -297,7 +315,7 @@ export default function ScopeFreeze({ session, setSession }) {
       const match = _orig && list.find((m) => m.name === _orig);
       if (match && !_new) d[match._id] = { ...draft, _id: match._id };
       else {
-        const m = withId({ name: "", description: "", access: "signed_in", access_note: "" });
+        const m = withId({ name: "", description: "", access: "signed_in", access_note: "", starts_when: "", outcome: "" });
         list = [...list, m];
         nw[m._id] = true;
         d[m._id] = { ...draft, _id: m._id };

@@ -95,6 +95,10 @@ class ModuleSpec(BaseModel):
     # trial/marketing part, full feature after sign-in).
     access: str = "signed_in"
     access_note: str = ""
+    # 2026-10-01 boundary: where this module's flow starts and the outcome
+    # it ends with, so flows stop retelling the whole product.
+    starts_when: str = ""
+    outcome: str = ""
 
 
 class DomainCheck(BaseModel):
@@ -286,6 +290,13 @@ class FlowCommentRequest(BaseModel):
 class FlowModuleRequest(BaseModel):
     session_id: str
     module: str
+
+
+class ModuleBoundaryRequest(BaseModel):
+    session_id: str
+    module: str
+    starts_when: str = ""
+    outcome: str = ""
 
 
 class FlowFreezeRequest(BaseModel):

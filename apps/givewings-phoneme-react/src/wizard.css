@@ -613,3 +613,23 @@ button.journey-link:hover { background: #faf6f2; }
 .std-mini { margin-left: 6px; font-size: 10.5px; padding: 1px 6px; }
 .std-tag { color: #187e4e; font-weight: 700; }
 @media (max-width: 760px) { .std-grid { grid-template-columns: minmax(0, 1fr); } .module-foot { flex-wrap: wrap; } }
+
+/* --- Module boundaries (2026-10-01) --- */
+.boundary { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.boundary > svg { align-self: center; color: #b3530a; flex-shrink: 0; }
+.boundary span { flex: 1 1 220px; min-width: 0; padding: 8px 10px; border-radius: 8px; background: #fff4ea; font-size: 13px; line-height: 1.45; color: #3d3f44; }
+.boundary b { display: block; font: 800 10.5px Manrope, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #b3530a; margin-bottom: 2px; }
+.boundary.missing, p.boundary.missing { display: block; padding: 8px 10px; border-radius: 8px; background: #fff8e6; color: #7a5200; font-size: 12.5px; }
+.boundary-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.boundary-fields label { display: flex; flex-direction: column; gap: 4px; }
+.boundary-fields label span { font: 800 11px Manrope, sans-serif; letter-spacing: .05em; text-transform: uppercase; color: #3d3f44; }
+.boundary-fields input { height: 38px; padding: 0 12px; border: 1px solid #e5e2dd; border-radius: 10px; font: 500 13.5px "DM Sans", sans-serif; background: #fff; min-width: 0; }
+.boundary-fields input:focus { outline: 2px solid #ff7200; outline-offset: 1px; }
+.boundary-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 12px; padding: 10px 12px; border: 1px dashed #f0c9a6; border-radius: 12px; background: #fffaf5; }
+.boundary-bar .boundary { flex: 1 1 420px; margin-top: 0; }
+.boundary-bar.missing { border-color: #f0d48a; background: #fffbef; }
+.boundary-bar.missing > .muted { flex: 1; }
+.boundary-bar.editing { display: block; }
+.boundary-bar.editing .boundary-fields { margin-top: 0; margin-bottom: 8px; }
+.boundary-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 760px) { .boundary-fields { grid-template-columns: minmax(0, 1fr); } }

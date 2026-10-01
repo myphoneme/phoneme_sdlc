@@ -32,7 +32,10 @@ async def fake(feature, prompt, system=None):
     if f == ai_router.Feature.MODULE_BREAKDOWN:
         return {"text": '{"modules":[{"name":"Ingestion Vault","description":"captures forwards","platform_core":false},{"name":"Catalogue","description":"genre/topic","platform_core":false},{"name":"Auth & Identity","description":"login","platform_core":true}]}'}
     if f == ai_router.Feature.TECH_DESIGN_GENERATION:
-        return {"text": "1. User forwards\n2. Webhook stores\n3. UI shows"}
+        flow_prompts.append(prompt)
+        if "too technical" in prompt:
+            return {"text": "1. User: forwards a link\n2. RelayReel: saves it to the vault\n3. User: sees it in the inbox"}
+        return {"text": "1. User: forwards a link\n2. Gateway: calls POST /ingest/email and writes raw_messages\n3. User: sees it"}
     if f == ai_router.Feature.BRD_PRD_DRAFTING and "Review these as ONE set" in prompt:
         return {"text": json.dumps({"verdict": "Two documents overlap.", "issues": [{"documents": ["RELA-001", "RELA-002", "BOGUS"], "problem": "Both describe capturing links.", "suggestion": "Keep capture only in RELA-001."}]})}
     if f == ai_router.Feature.BRD_PRD_DRAFTING:
@@ -53,6 +56,7 @@ async def fake(feature, prompt, system=None):
         return {"text": json.dumps(doc)}
     return {"text": "ok"}
 fail_once = {"on": True}
+flow_prompts = []
 ai_router.generate = fake
 
 async def fake_check(client, d):
@@ -107,6 +111,9 @@ async def run():
         s = await post("/api/wizard/modules/save", {"session_id": sid, "modules": [m for m in specs if m.get("kind") != "standard"]})
         assert s["module_specs"][0]["tailoring"] == "Sign in with WhatsApp OTP" and len(s["module_specs"]) == 7, s["modules"]
         s = await post("/api/wizard/modules/confirm", {"session_id": sid}); assert s["stage"] == "flow"
+        s = await post("/api/wizard/modules/boundary", {"session_id": sid, "module": "Ingestion Vault", "starts_when": "User sets up their vault", "outcome": "Every forwarded item lands in the vault inbox"})
+        assert s["module_specs"][1]["outcome"] == "Every forwarded item lands in the vault inbox"
+        await post("/api/wizard/modules/boundary", {"session_id": sid, "module": "Sign-in & Account", "starts_when": "x"}, 404)
         s = await post("/api/wizard/flows/generate", {"session_id": sid}); assert len(s["module_flows"]) == 7, [f["module"] for f in s["module_flows"]]
         std = [f for f in s["module_flows"] if f["standard"]]
         assert len(std) == 4 and all(f["status"] == "Approved" for f in std)
@@ -114,6 +121,12 @@ async def run():
         m = "Ingestion Vault"
         s = await post("/api/wizard/flows/update", {"session_id": sid, "module": m, "steps": ["A", " ", "B edited", "C new"]})
         assert next(f for f in s["module_flows"] if f["module"] == m)["steps"] == ["A", "B edited", "C new"]
+        assert any("STARTS when: User sets up their vault" in p for p in flow_prompts), "boundary missing from flow prompt"
+        s = await post("/api/wizard/flows/redraft", {"session_id": sid, "module": m})
+        rd = next(f for f in s["module_flows"] if f["module"] == m)
+        assert rd["status"] == "Draft" and rd["steps"][0].startswith("User:") and not any("POST" in x for x in rd["steps"]), rd["steps"]
+        await post("/api/wizard/flows/redraft", {"session_id": sid, "module": "Sign-in & Account"}, 409)
+        s = await post("/api/wizard/flows/update", {"session_id": sid, "module": m, "steps": ["A", " ", "B edited", "C new"]})
         await post("/api/wizard/flows/freeze", {"session_id": sid}, 400)
         for f in s["module_flows"]:
             if not f["standard"]:

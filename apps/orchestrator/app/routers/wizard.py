@@ -20,6 +20,7 @@ from ..models import (
     FlowFreezeRequest,
     FlowModuleRequest,
     FlowStepsUpdateRequest,
+    ModuleBoundaryRequest,
     FreezeRequest,
     GenerateRequest,
     GenerationItem,
@@ -131,8 +132,16 @@ def module_map(state: SessionState, current: str | None = None) -> str:
     for m in specs:
         tag = " [standard module]" if m.kind == "standard" else ""
         mark = "  <-- THIS MODULE" if current and m.name == current else ""
-        lines.append(f"- {m.name}{tag}: {m.description or 'no description'}{mark}")
+        bound = ""
+        if m.starts_when or m.outcome:
+            bound = f" [starts when: {m.starts_when or '?'} -> outcome: {m.outcome or '?'}]"
+        lines.append(f"- {m.name}{tag}: {_short(m.description) or 'no description'}{bound}{mark}")
     return "\n".join(lines)
+
+
+def _short(text: str, words: int = 45) -> str:
+    w = (text or "").split()
+    return " ".join(w[:words]) + (" …" if len(w) > words else "")
 
 
 BOUNDARY_RULE = (
@@ -178,7 +187,10 @@ async def freeze_scope(req: FreezeRequest):
             "trial part plus the full feature after sign-in). Respond with ONLY "
             'JSON: {"modules": [{"name": "short module name", "description": '
             '"one sentence on what this module is responsible for", '
-            '"access": "signed_in", "access_note": "what visitors can do without signing in, if public/mixed"}]}',
+            '"access": "signed_in", "access_note": "what visitors can do without signing in, if public/mixed", '
+            '"starts_when": "the trigger that starts this module, one short phrase", '
+            '"outcome": "the concrete result this module ends with and hands on, one short phrase"}]} '
+            "Boundaries must chain: each module starts where the previous one's outcome ends, and no two modules share steps.",
             system="You are the module-breakdown step of the Idea-to-BRD/PRD Wizard. JSON only.",
         )
         specs: list[ModuleSpec] = []
@@ -224,6 +236,7 @@ async def save_modules(req: ModulesSaveRequest):
         cleaned.append(ModuleSpec(
             name=m.name.strip(), description=m.description.strip(), merged_from=m.merged_from,
             access=m.access if m.access in ACCESS_TEXT else "signed_in", access_note=m.access_note.strip(),
+            starts_when=m.starts_when.strip(), outcome=m.outcome.strip(),
         ))
     names = [m.name.lower() for m in cleaned]
     if len(names) != len(set(names)):
@@ -269,6 +282,8 @@ def _business_spec(name: str, m: dict) -> ModuleSpec:
         name=name, description=_strip_markdown(str(m.get("description", ""))),
         access=access if access in ACCESS_TEXT else "signed_in",
         access_note=_strip_markdown(str(m.get("access_note") or "")) if access != "signed_in" else "",
+        starts_when=_strip_markdown(str(m.get("starts_when") or "")),
+        outcome=_strip_markdown(str(m.get("outcome") or "")),
     )
 
 
@@ -294,7 +309,7 @@ async def consolidate_modules(req: ConsolidateRequest):
         "exactly one new module. Respond with ONLY JSON: "
         '{"rationale": "2-3 sentences on what was merged and why", '
         '"modules": [{"name": "...", "description": "one sentence on what it owns", '
-        '"access": "signed_in|public|mixed", "access_note": "", '
+        '"access": "signed_in|public|mixed", "access_note": "", "starts_when": "trigger", "outcome": "end result", '
         '"merged_from": ["<current module names it replaces>"]}]}',
         system="You are a pragmatic product architect simplifying a module breakdown. JSON only.",
     )
@@ -384,34 +399,7 @@ async def _generate_flows(state: SessionState) -> SessionState:
             await store.save_session(fresh)
             state = fresh
             continue
-        result = await ai_router.generate(
-            ai_router.Feature.TECH_DESIGN_GENERATION,
-            f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n"
-            f"All modules of this product:\n{module_map(state, module)}\n\n"
-            f"Module: {module}{research_context}\n\n"
-            + BOUNDARY_RULE + " "
-            "Write the key sequence flow for this module: the numbered, "
-            "step-by-step path from a user's action through to the "
-            "outcome, in the order it actually happens. Start every step "
-            "with who does it, then a colon -- e.g. 'User: forwards a link "
-            "to the RelayReel WhatsApp number' or 'RelayReel: saves it to "
-            "the user's private vault'. Be concrete and specific to this "
-            "module and concept (name the screens and decisions), but in "
-            "business language -- no API endpoints, paths, HTTP methods, "
-            "table/queue/field names or code identifiers; those are "
-            "decided later in Technical Design. One step per line, "
-            "numbered '1.', '2.', etc. 5-10 steps. No headers.",
-            system="You are the flow-design step of the Idea-to-BRD/PRD "
-            "Wizard, run before BRD/PRD drafting so the requirement text "
-            "that follows is grounded in a concrete, agreed mechanism "
-            "rather than an abstract description. Plain text only, "
-            "business language.",
-        )
-        steps = [
-            _strip_markdown(re.sub(r"^\d+[\.\)]\s*", "", l.strip()))
-            for l in result["text"].splitlines()
-            if l.strip()
-        ]
+        steps = await _draft_flow(state, module, research_context)
         # Merge into a fresh copy so approvals/edits the user made on
         # already-drafted flows while this batch runs are never overwritten.
         fresh = await store.get_session(state.session_id) or state
@@ -421,6 +409,126 @@ async def _generate_flows(state: SessionState) -> SessionState:
         state = fresh
 
     return state
+
+
+FLOW_STEP_RULES = (
+    "Write 4-8 numbered steps, one per line ('1.', '2.', ...), no headers. "
+    "Start every step with who does it, then a colon -- e.g. 'User: forwards "
+    "a link to the RelayReel WhatsApp number' or 'RelayReel: saves it to the "
+    "user's vault'. One short sentence per step (max 25 words). Business "
+    "language only: no API endpoints, paths, HTTP methods, table/queue/field "
+    "names, code identifiers, services, workers or pipelines -- those are "
+    "decided later in Technical Design."
+)
+
+
+def _boundary_text(spec: ModuleSpec | None) -> str:
+    if not spec:
+        return ""
+    if spec.starts_when or spec.outcome:
+        return (
+            "\n\nMODULE BOUNDARY (strict):\n"
+            f"- The flow STARTS when: {spec.starts_when or 'this module receives work from the previous module'}\n"
+            f"- The flow ENDS with this outcome: {spec.outcome or 'this module has produced its own result and handed it on'}\n"
+            "Step 1 must be the start trigger and the last step must deliver the outcome. "
+            "Include ONLY the steps between these two points. Anything before the start "
+            "belongs to an earlier module and anything after the outcome belongs to a later "
+            "module -- leave it out (at most name the next module in the last step)."
+        )
+    return (
+        "\n\nMODULE BOUNDARY: start at the point this module receives work from the "
+        "module before it and stop as soon as this module's own result exists. Do not "
+        "include steps that belong to the other modules listed above."
+    )
+
+
+def _parse_steps(text: str) -> list[str]:
+    return [
+        _strip_markdown(re.sub(r"^\s*(step\s*)?\d+[\.\):]\s*", "", l.strip(), flags=re.I))
+        for l in text.splitlines()
+        if l.strip() and not l.strip().startswith("#")
+    ]
+
+
+async def _draft_flow(state: SessionState, module: str, research_context: str = "") -> list[str]:
+    """One module's key sequence flow, kept inside the module's boundary
+    (2026-10-01 RelayReel review: every module's flow retold the whole
+    product with endpoints and table names)."""
+    spec = next((m for m in state.module_specs if m.name == module), None)
+    desc = f"\nWhat this module is responsible for: {spec.description}" if spec and spec.description else ""
+    system = (
+        "You are the flow-design step of the Idea-to-BRD/PRD Wizard. You write "
+        "one module's flow only, never the whole product. Plain text only, "
+        "business language."
+    )
+    result = await ai_router.generate(
+        ai_router.Feature.TECH_DESIGN_GENERATION,
+        f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n"
+        f"All modules of this product, in order:\n{module_map(state, module)}\n\n"
+        f"Module: {module}{desc}{_boundary_text(spec)}{research_context}\n\n"
+        "Write the key sequence flow for THIS module only: the step-by-step path "
+        "from its start trigger to its outcome, in the order it happens. Name the "
+        "screens and decisions the user sees. " + FLOW_STEP_RULES,
+        system=system,
+    )
+    steps = _parse_steps(result["text"])
+    leaks = reqdoc.technical_leaks("\n".join(steps))
+    too_long = [s for s in steps if len(s.split()) > 40]
+    if leaks or too_long or len(steps) > 10:
+        fix = await ai_router.generate(
+            ai_router.Feature.TECH_DESIGN_GENERATION,
+            f"Module: {module}{_boundary_text(spec)}\n\nThis draft flow is too technical, too long "
+            f"or strays outside the module boundary ({'; '.join(leaks[:4]) or 'steps too long'}). "
+            "Rewrite it within the boundary. " + FLOW_STEP_RULES + "\n\nDraft:\n"
+            + "\n".join(f"{i+1}. {s}" for i, s in enumerate(steps)),
+            system=system,
+        )
+        fixed = _parse_steps(fix["text"])
+        if fixed:
+            steps = fixed
+    return steps
+
+
+@router.post("/modules/boundary", response_model=SessionState)
+async def set_module_boundary(req: ModuleBoundaryRequest):
+    """Set where a product module starts and the outcome it ends with --
+    editable on Freeze Scope and in Flow Design (it does not change the
+    module list, so it needs no scope reopen)."""
+    state = await store.get_session(req.session_id)
+    if not state:
+        raise HTTPException(404, "session not found")
+    if state.stage not in ("freeze", "flow"):
+        raise HTTPException(409, "boundaries can be changed only before flows are frozen")
+    spec = next((m for m in state.module_specs if m.name == req.module and m.kind != "standard"), None)
+    if not spec:
+        raise HTTPException(404, "product module not found")
+    spec.starts_when, spec.outcome = req.starts_when.strip(), req.outcome.strip()
+    await store.save_session(state)
+    return state
+
+
+@router.post("/flows/redraft", response_model=SessionState)
+async def redraft_flow(req: FlowModuleRequest):
+    """Throw away a module's flow and draft it again within its boundary."""
+    async with session_lock(req.session_id, f"redraft:{req.module}"):
+        state = await store.get_session(req.session_id)
+        if not state:
+            raise HTTPException(404, "session not found")
+        if state.stage != "flow":
+            raise HTTPException(409, "flows can be redrafted only during Flow Design")
+        flow = next((f for f in state.module_flows if f.module == req.module), None)
+        if not flow:
+            raise HTTPException(404, "flow not found for module")
+        if flow.standard:
+            raise HTTPException(409, "standard module flows are fixed by the GiveWings template")
+        steps = await _draft_flow(state, req.module, _research_context(state))
+        if not steps:
+            raise HTTPException(502, "the AI did not return a usable flow — try again")
+        state = await store.get_session(req.session_id) or state
+        flow = next(f for f in state.module_flows if f.module == req.module)
+        flow.steps, flow.revised_steps, flow.status = steps, None, "Draft"
+        await store.save_session(state)
+        return state
 
 
 @router.post("/flows/comment", response_model=SessionState)
@@ -441,7 +549,8 @@ async def comment_flow(req: FlowCommentRequest):
     current = "\n".join(f"{i+1}. {s}" for i, s in enumerate(flow.steps))
     result = await ai_router.generate(
         ai_router.Feature.REGENERATE_FROM_COMMENTS,
-        f"Current sequence flow for module '{flow.module}':\n{current}\n\n"
+        f"Current sequence flow for module '{flow.module}':\n{current}"
+        f"{_boundary_text(next((m for m in state.module_specs if m.name == flow.module), None))}\n\n"
         f"Reviewer comment: {req.comment}\n\n"
         "Rewrite the full numbered sequence flow to address the comment. "
         "Keep steps that are still correct; revise or add steps as the "
@@ -666,6 +775,12 @@ async def _draft_requirement(state: SessionState, module: str, req_id: str) -> R
     ctx = ""
     if spec and spec.description:
         ctx += f"\nModule responsibility: {spec.description}"
+    if spec and (spec.starts_when or spec.outcome):
+        ctx += (
+            f"\nBoundary: this module starts when {spec.starts_when or 'it receives work from the previous module'} "
+            f"and ends with: {spec.outcome or 'its own result'}. The journey covers only that span; "
+            "use receives_from / hands_off_to for what lies outside it."
+        )
     if spec:
         ctx += f"\nWho can use it: {ACCESS_TEXT.get(spec.access, ACCESS_TEXT['signed_in'])}"
         if spec.access_note:

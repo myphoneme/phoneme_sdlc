@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, PenLine, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, PenLine, Plus, RefreshCw, Save, ShieldCheck, Trash2, X } from "lucide-react";
 import { api } from "../api.js";
 import { FlowStepText } from "./RequirementDoc.jsx";
 
@@ -47,7 +47,50 @@ function StepEditor({ steps, onSave, onCancel, busy }) {
   );
 }
 
-function FlowCard({ sessionId, flow, onChange }) {
+function BoundaryBar({ sessionId, spec, flow, busy, act }) {
+  const [editing, setEditing] = useState(false);
+  const [sw, setSw] = useState(spec?.starts_when || "");
+  const [oc, setOc] = useState(spec?.outcome || "");
+  if (!spec) return null;
+  const has = spec.starts_when || spec.outcome;
+  const save = async () => {
+    if (await act(() => api.setBoundary(sessionId, spec.name, sw.trim(), oc.trim()))) setEditing(false);
+  };
+  if (editing) {
+    return (
+      <div className="boundary-bar editing">
+        <div className="boundary-fields">
+          <label><span>Starts when</span><input value={sw} onChange={(e) => setSw(e.target.value)} placeholder="The trigger that starts this module" /></label>
+          <label><span>Outcome (ends with)</span><input value={oc} onChange={(e) => setOc(e.target.value)} placeholder="The result this module ends with" /></label>
+        </div>
+        <div className="requirement-actions">
+          <button className="btn-secondary sm" disabled={busy} onClick={() => { setSw(spec.starts_when || ""); setOc(spec.outcome || ""); setEditing(false); }}><X size={13} /> Cancel</button>
+          <button className="btn-primary sm-primary" disabled={busy} onClick={save}><Save size={13} /> Save boundary</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className={"boundary-bar" + (has ? "" : " missing")}>
+      {has ? (
+        <div className="boundary">
+          <span><b>Starts when</b>{spec.starts_when || "—"}</span>
+          <ArrowRight size={14} aria-hidden="true" />
+          <span><b>Outcome</b>{spec.outcome || "—"}</span>
+        </div>
+      ) : <span className="muted small">No boundary set — the flow may spill into other modules. Add one, then redraft.</span>}
+      <span className="boundary-actions">
+        <button type="button" className="btn-secondary sm" disabled={busy} onClick={() => setEditing(true)}><PenLine size={13} /> {has ? "Edit boundary" : "Set boundary"}</button>
+        {!flow.revised_steps && (
+          <button type="button" className="btn-secondary sm" disabled={busy || !has} title={has ? "" : "Set a boundary first"}
+            onClick={() => act(() => api.redraftFlow(sessionId, flow.module))}><RefreshCw size={13} /> {busy ? "Working…" : "Redraft within boundary"}</button>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function FlowCard({ sessionId, flow, spec, onChange }) {
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -82,6 +125,8 @@ function FlowCard({ sessionId, flow, onChange }) {
           <button type="button" className="btn-secondary sm" disabled={busy} onClick={() => setEditing(true)}><PenLine size={14} /> Edit steps</button>
         )}
       </div>
+
+      <BoundaryBar sessionId={sessionId} spec={spec} flow={flow} busy={busy} act={act} />
 
       {editing ? (
         <StepEditor
@@ -213,7 +258,7 @@ export default function ModuleFlowReview({ session, setSession }) {
 
       <div className="requirement-feed">
         {reviewable.map((f) => (
-          <FlowCard key={f.module} sessionId={session.session_id} flow={f} onChange={handleChange} />
+          <FlowCard key={f.module} sessionId={session.session_id} flow={f} spec={specs.find((m) => m.name === f.module)} onChange={handleChange} />
         ))}
       </div>
 
