@@ -13,6 +13,9 @@ from fastapi import APIRouter, HTTPException
 from .. import ai_router, reqdoc, store
 from ..locks import session_lock
 from ..models import (
+    ArchivedRequirementSet,
+    ConsolidateRequest,
+    ReopenScopeRequest,
     FlowCommentRequest,
     FlowFreezeRequest,
     FlowModuleRequest,
@@ -91,6 +94,36 @@ def _sync_module_names(state: SessionState) -> None:
     ]
 
 
+MODULE_SIZING_RULE = (
+    "Use the FEWEST modules that keep responsibilities distinct: 3-4 for a "
+    "small product or MVP, 5-6 for a medium one, more only for a genuinely "
+    "large platform. Each module must own a distinct, non-overlapping part "
+    "of the user journey -- if two modules would both describe capturing, "
+    "organising or publishing the same content, merge them."
+)
+
+
+def module_map(state: SessionState, current: str | None = None) -> str:
+    """All modules with their responsibilities, so every flow/requirement is
+    written knowing its neighbours (2026-09-30: drafting each module in
+    isolation made every document retell the whole product)."""
+    specs = state.module_specs or [ModuleSpec(name=m, platform_core=_is_platform_core(m)) for m in state.modules]
+    lines = []
+    for m in specs:
+        name = f"Platform-Core: {m.name}" if m.platform_core and not m.name.lower().startswith("platform-core") else m.name
+        mark = "  <-- THIS MODULE" if current and (name == current or m.name == current) else ""
+        lines.append(f"- {name}: {m.description or 'no description'}{mark}")
+    return "\n".join(lines)
+
+
+BOUNDARY_RULE = (
+    "Describe ONLY this module's own responsibility. Start where it receives "
+    "work from another module and stop where it hands off -- refer to other "
+    "modules by name instead of describing what they do. Never retell the "
+    "whole product journey."
+)
+
+
 @router.post("/freeze", response_model=SessionState)
 async def freeze_scope(req: FreezeRequest):
     """Draft the module breakdown -- critical tier. 2026-09-30: this used to
@@ -115,8 +148,9 @@ async def freeze_scope(req: FreezeRequest):
             ai_router.Feature.MODULE_BREAKDOWN,
             f"Product: {state.selected_name}\nConcept: {state.concept_summary}"
             f"{research_context}\n\n"
-            "Break this product down into 5-9 functional modules for a BRD/PRD, "
-            "in the order they would be built. Authentication, security and "
+            "Break this product down into functional modules for a BRD/PRD, "
+            "in the order they would be built. " + MODULE_SIZING_RULE + " "
+            "Authentication, security and "
             "API-gateway concerns are provided by Platform-Core (BRD/PRD "
             "Section 18.6): include them as modules with platform_core true "
             "rather than drafting them as new modules. Respond with ONLY "
@@ -178,6 +212,11 @@ async def confirm_modules(req: SessionRequest):
         _sync_module_names(state)
         keep = set(state.modules)
         state.module_flows = [f for f in state.module_flows if f.module in keep]
+        if state.scope_revision > 0:
+            # Boundaries moved -- surviving flows must be re-approved.
+            for f in state.module_flows:
+                f.status = "Draft"
+                f.revised_steps = None
         state.stage = "flow"
         await store.save_session(state)
     return state
@@ -185,6 +224,80 @@ async def confirm_modules(req: SessionRequest):
 
 def _is_platform_core(module: str) -> bool:
     return module.strip().lower().startswith("platform-core")
+
+
+@router.post("/modules/consolidate")
+async def consolidate_modules(req: ConsolidateRequest):
+    """AI proposal to restructure the module list (merge overlapping
+    modules, hit a target count). Returned to the editor, not saved -- the
+    user reviews/edits it and then saves as usual."""
+    state = await store.get_session(req.session_id)
+    if not state:
+        raise HTTPException(404, "session not found")
+    if state.stage != "freeze":
+        raise HTTPException(409, "reopen scope before restructuring modules")
+    target = f"Aim for exactly {req.target} product modules (plus any Platform-Core). " if req.target else ""
+    result = await ai_router.generate(
+        ai_router.Feature.MODULE_BREAKDOWN,
+        f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n\n"
+        f"Current modules:\n{module_map(state)}\n\n"
+        f"Reviewer instruction: {req.instruction or 'Remove overlap and simplify.'}\n"
+        f"{target}{MODULE_SIZING_RULE}\n\n"
+        "Propose a new module list. Every capability of the current modules "
+        "must still belong to exactly one new module. Respond with ONLY JSON: "
+        '{"rationale": "2-3 sentences on what was merged and why", '
+        '"modules": [{"name": "...", "description": "one sentence on what it owns", '
+        '"platform_core": false, "merged_from": ["<current module names it replaces>"]}]}',
+        system="You are a pragmatic product architect simplifying a module breakdown. JSON only.",
+    )
+    try:
+        data = _extract_json(result["text"])
+    except (ValueError, json.JSONDecodeError):
+        raise HTTPException(502, "the AI did not return a usable proposal — try again")
+    specs = []
+    for m in data.get("modules", []):
+        if isinstance(m, dict) and str(m.get("name", "")).strip():
+            name = re.sub(r"^platform-core:\s*", "", _strip_markdown(str(m["name"]).strip()), flags=re.I)
+            specs.append(ModuleSpec(
+                name=name, description=_strip_markdown(str(m.get("description", ""))),
+                platform_core=bool(m.get("platform_core")) or _is_platform_core(str(m["name"])),
+                merged_from=[_strip_markdown(str(x)) for x in (m.get("merged_from") or []) if str(x).strip()],
+            ))
+    if not specs:
+        raise HTTPException(502, "the AI did not return a usable proposal — try again")
+    return {"rationale": _strip_markdown(str(data.get("rationale", ""))), "modules": [s.model_dump() for s in specs]}
+
+
+@router.post("/reopen-scope", response_model=SessionState)
+async def reopen_scope(req: ReopenScopeRequest):
+    """Go back to Freeze Scope to redefine modules (2026-09-30 RelayReel
+    review: 8 overlapping modules for a small product, with no way back).
+    Drafted requirements -- including frozen ones -- are archived on the
+    session, not deleted; flows are kept and matched by module name when
+    the new scope is confirmed."""
+    async with session_lock(req.session_id, "generate"):
+        state = await store.get_session(req.session_id)
+        if not state:
+            raise HTTPException(404, "session not found")
+        if state.stage not in ("flow", "generating", "manager"):
+            raise HTTPException(409, "scope can only be reopened after it has been frozen")
+        if state.generation.status == "running" and not _is_stale(state.generation):
+            raise HTTPException(409, "wait for BRD/PRD drafting to finish before reopening scope")
+        old = await store.clear_requirements(state.session_id)
+        state = await store.get_session(req.session_id) or state
+        if old:
+            state.requirement_archive.append(ArchivedRequirementSet(
+                archived_at=_now(), reason=req.reason or "Scope redefined",
+                modules=list(state.modules), requirements=old,
+            ))
+        if not state.module_specs:
+            state.module_specs = [ModuleSpec(name=m, platform_core=_is_platform_core(m)) for m in state.modules]
+        state.generation = GenerationProgress()
+        state.consistency = None
+        state.scope_revision += 1
+        state.stage = "freeze"
+        await store.save_session(state)
+        return state
 
 
 @router.post("/flows/generate", response_model=SessionState)
@@ -212,7 +325,9 @@ async def _generate_flows(state: SessionState) -> SessionState:
         result = await ai_router.generate(
             ai_router.Feature.TECH_DESIGN_GENERATION,
             f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n"
+            f"All modules of this product:\n{module_map(state, module)}\n\n"
             f"Module: {module}{research_context}\n\n"
+            + BOUNDARY_RULE + " "
             "Write the key sequence flow for this module: the numbered, "
             "step-by-step path from a user's action through to the "
             "outcome, in the order it actually happens. Start every step "
@@ -480,8 +595,9 @@ async def _draft_requirement(state: SessionState, module: str, req_id: str) -> R
             "(who signs in, what they may access), not how it is built."
         )
     title, doc = await reqdoc.generate_doc(
-        f"Product: {state.selected_name}\nConcept: {state.concept_summary}\nModule: {module}{ctx}\n\n"
-        "Write the BRD/PRD requirement for this module.",
+        f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n"
+        f"All modules of this product:\n{module_map(state, module)}\n\nModule: {module}{ctx}\n\n"
+        "Write the BRD/PRD requirement for this module. " + BOUNDARY_RULE,
         fallback_title=module,
     )
     return Requirement(

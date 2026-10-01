@@ -196,6 +196,27 @@ async def add_requirement(session_id: str, req: Requirement) -> None:
         )
 
 
+async def clear_requirements(session_id: str) -> list[Requirement]:
+    """Remove and return every requirement for a session (used when scope is
+    redefined -- the caller archives them on the SessionState so nothing is
+    lost)."""
+    if not _USE_DB:
+        return list(_requirements.pop(session_id, {}).values())
+
+    raw = await _load_row(session_id)
+    if raw is None:
+        return []
+    state, reqs = _from_envelope(raw)
+    engine = get_engine()
+    async with engine.begin() as conn:
+        await conn.execute(
+            update(wizard_sessions)
+            .where(wizard_sessions.c.session_id == session_id)
+            .values(state=_envelope(state, {}), updated_at=func.now())
+        )
+    return list(reqs.values())
+
+
 async def list_requirements(session_id: str) -> list[Requirement]:
     if not _USE_DB:
         return list(_requirements.get(session_id, {}).values())

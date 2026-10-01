@@ -3,6 +3,7 @@ import { FlowStepText } from "./RequirementDoc.jsx";
 import { ResearchReportView } from "./ResearchCard.jsx";
 import { IdentitySummary } from "./IdentityStudio.jsx";
 import { GenerationBoard } from "./Generating.jsx";
+import ReopenScope from "./ReopenScope.jsx";
 
 const BRIEF_FIELDS = [
   ["target_users", "Target users"], ["core_workflow", "Core workflow"], ["input_channels", "Input channels"],
@@ -75,12 +76,17 @@ function IdentityReview({ session }) {
   );
 }
 
-function ScopeReview({ session }) {
+function ScopeReview({ session, setSession, requirements }) {
   const specs = session.module_specs?.length
     ? session.module_specs
     : (session.modules || []).map((m) => ({ name: m, description: "", platform_core: m.toLowerCase().startsWith("platform-core") }));
   if (!specs.length) return <Empty>No modules recorded.</Empty>;
   return (
+    <div className="review-stack">
+    <div className="scope-review-bar">
+      <span className="muted">{specs.filter((m) => !m.platform_core).length} product modules were frozen. Too many, or overlapping?</span>
+      <ReopenScope session={session} setSession={setSession} requirements={requirements} />
+    </div>
     <ol className="module-grid review">
       {specs.map((m, i) => (
         <li key={i} className={"module-tile" + (m.platform_core ? " core" : "")}>
@@ -90,6 +96,7 @@ function ScopeReview({ session }) {
         </li>
       ))}
     </ol>
+    </div>
   );
 }
 
@@ -126,11 +133,11 @@ function GenerationReview({ session, requirements }) {
   );
 }
 
-export default function StageReview({ stage, session, requirements }) {
+export default function StageReview({ stage, session, setSession, requirements }) {
   if (stage === "discovery") return <DiscoveryReview session={session} />;
   if (stage === "research") return session.research ? <ResearchReportView research={session.research} /> : <Empty>No research recorded.</Empty>;
   if (stage === "identity") return <IdentityReview session={session} />;
-  if (stage === "freeze") return <ScopeReview session={session} />;
+  if (stage === "freeze") return <ScopeReview session={session} setSession={setSession} requirements={requirements} />;
   if (stage === "flow") return <FlowReview session={session} />;
   if (stage === "generating") return <GenerationReview session={session} requirements={requirements} />;
   return <Empty>Nothing to review here yet.</Empty>;

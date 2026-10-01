@@ -441,7 +441,7 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
           </header>
           <div className="stage-panel-body">
             {reviewing ? (
-              <StageReview stage={viewStage} session={session} requirements={requirements} />
+              <StageReview stage={viewStage} session={session} setSession={setSession} requirements={requirements} />
             ) : (
               <>
                 {stage === 'discovery' && <DiscoveryChat session={session} setSession={setSession} />}
@@ -454,7 +454,7 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
                   <Generating session={session} setSession={setSession} setRequirements={setRequirements} />
                 )}
                 {stage === 'manager' && (
-                  <BrdPrdManager session={session} requirements={requirements} setRequirements={setRequirements} />
+                  <BrdPrdManager session={session} setSession={setSession} requirements={requirements} setRequirements={setRequirements} />
                 )}
               </>
             )}

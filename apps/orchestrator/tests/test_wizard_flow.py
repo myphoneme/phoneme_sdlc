@@ -26,12 +26,22 @@ async def fake(feature, prompt, system=None):
         if "taglines" in prompt: return {"text": '{"taglines":["Forward it. Own it.","Your feed, remade"]}'}
         if "palettes" in prompt: return {"text": '{"palettes":[{"name":"Teal Tide","mood":"calm","primary":"#0F766E","ink":"#12302D","surface":"#E3F3F1","accent":"#FF7200","rationale":"x"},{"name":"bad","primary":"red","ink":"#000000","surface":"#ffffff","accent":"#000000"}]}'}
         return {"text": json.dumps({"logos":[{"concept":"relay loop","svg":LOGO},{"concept":"broken","svg":"<svg><foo"}]})}
+    if f == ai_router.Feature.MODULE_BREAKDOWN and "Current modules" in prompt:
+        assert "Aim for exactly 2" in prompt
+        return {"text": json.dumps({"rationale": "Merged capture and cataloguing.", "modules": [
+            {"name": "Capture & Catalogue", "description": "Forwarding in, sorted by topic", "platform_core": False, "merged_from": ["Ingestion Vault", "Genre & Topic Catalogue"]},
+            {"name": "Repurpose Studio", "description": "text/image/video", "platform_core": False, "merged_from": ["Repurpose Studio"]},
+            {"name": "Auth & Identity", "description": "login", "platform_core": True}]})}
     if f == ai_router.Feature.MODULE_BREAKDOWN:
         return {"text": '{"modules":[{"name":"Ingestion Vault","description":"captures forwards","platform_core":false},{"name":"Catalogue","description":"genre/topic","platform_core":false},{"name":"Auth & Identity","description":"login","platform_core":true}]}'}
     if f == ai_router.Feature.TECH_DESIGN_GENERATION:
         return {"text": "1. User forwards\n2. Webhook stores\n3. UI shows"}
+    if f == ai_router.Feature.BRD_PRD_DRAFTING and "Review these as ONE set" in prompt:
+        return {"text": json.dumps({"verdict": "Two documents overlap.", "issues": [{"documents": ["RELA-001", "RELA-002", "BOGUS"], "problem": "Both describe capturing links.", "suggestion": "Keep capture only in RELA-001."}]})}
     if f == ai_router.Feature.BRD_PRD_DRAFTING:
         await asyncio.sleep(0.05)
+        if "Module: " in prompt and "All modules of this product" not in prompt and "Current requirement" not in prompt:
+            raise AssertionError("draft prompt missing module map")
         if "Catalogue" in prompt and "Module: Genre" in prompt and fail_once["on"]:
             fail_once["on"] = False
             raise RuntimeError("provider timeout")
@@ -141,5 +151,42 @@ async def run():
         assert rr["doc"]["summary"] and rr["title"] == "Capture forwarded content" and rr["status"] == "Approved", rr
         rr = await post(f"/api/brdprd/{sid}/comment", {"req_id": "RELA-900", "comment": "mention duplicates"})
         assert rr["revised_doc"], rr
+        # --- legacy prose can't be frozen; unfreeze works
+        await post(f"/api/brdprd/{sid}/accept", {"req_id": "RELA-900"})
+        await post(f"/api/brdprd/{sid}/freeze/RELA-900", {}, 200)
+        rr = await post(f"/api/brdprd/{sid}/unfreeze/RELA-900", {}); assert rr["status"] == "Approved"
+        legacy2 = Requirement(req_id="RELA-901", module="x", title="Old", body="prose", status="Approved")
+        await store.add_requirement(sid, legacy2)
+        await post(f"/api/brdprd/{sid}/freeze/RELA-901", {}, 400)
+        # --- consistency check
+        s = await post(f"/api/brdprd/{sid}/consistency", {})
+        assert s["consistency"]["issues"][0]["documents"] == ["RELA-001", "RELA-002"], s["consistency"]
+        # --- redefine scope
+        await post(f"/api/wizard/modules/consolidate", {"session_id": sid, "instruction": "small"}, 409)
+        await post(f"/api/brdprd/{sid}/freeze/RELA-001", {})
+        s = await post("/api/wizard/reopen-scope", {"session_id": sid, "reason": "too many modules"})
+        assert s["stage"] == "freeze" and s["scope_revision"] == 1 and s["consistency"] is None
+        arch = s["requirement_archive"][0]
+        assert len(arch["requirements"]) == 6 and any(r["status"] == "Frozen" for r in arch["requirements"]), [r["req_id"] for r in arch["requirements"]]
+        assert (await c.get(f"/api/brdprd/{sid}/requirements")).json() == []
+        prop = await post("/api/wizard/modules/consolidate", {"session_id": sid, "instruction": "small project, 2 modules", "target": 2})
+        assert prop["modules"][0]["merged_from"] == ["Ingestion Vault", "Genre & Topic Catalogue"], prop
+        s = await post("/api/wizard/modules/save", {"session_id": sid, "modules": prop["modules"]})
+        s = await post("/api/wizard/modules/confirm", {"session_id": sid})
+        flows = {f["module"]: f["status"] for f in s["module_flows"]}
+        assert flows == {"Repurpose Studio": "Draft"}, flows   # kept flow reset to Draft, removed ones dropped
+        s = await post("/api/wizard/flows/generate", {"session_id": sid})
+        assert sorted(f["module"] for f in s["module_flows"]) == ["Capture & Catalogue", "Repurpose Studio"]
+        for f in s["module_flows"]:
+            s = await post("/api/wizard/flows/accept", {"session_id": sid, "module": f["module"]})
+        s = await post("/api/wizard/flows/freeze", {"session_id": sid})
+        s = await post("/api/wizard/generate", {"session_id": sid})
+        for _ in range(60):
+            await asyncio.sleep(0.1)
+            s = (await c.get(f"/api/discovery/{sid}")).json()
+            if s["generation"]["status"] != "running": break
+        reqs = (await c.get(f"/api/brdprd/{sid}/requirements")).json()
+        print("after redefine:", s["generation"]["status"], [(r["req_id"], r["module"]) for r in reqs])
+        assert s["stage"] == "manager" and len(reqs) == 3
         print("ALL OK")
 asyncio.run(run())

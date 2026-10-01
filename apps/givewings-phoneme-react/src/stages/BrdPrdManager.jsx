@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Lock, Sparkles, Wand2 } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, GitCompare, Lock, LockOpen, Sparkles, Wand2 } from "lucide-react";
+import ReopenScope from "./ReopenScope.jsx";
 import { api } from "../api.js";
 import RequirementDoc, { FlowStrip, LegacyBody } from "./RequirementDoc.jsx";
 
@@ -99,8 +100,16 @@ function RequirementCard({ sessionId, req, onChange, open, onToggle }) {
                 {!req.doc && <button className="btn-secondary" disabled={!!busy} onClick={() => act("Restructuring…", () => api.restructure(sessionId, req.req_id))}><Wand2 size={15} /> Restructure</button>}
                 <button className="btn-secondary" disabled={!!busy || !comment.trim()} onClick={submitComment}>Rework with AI</button>
                 {req.status === "Draft" && <button className="btn-primary" disabled={!!busy} onClick={() => act("Approving…", () => api.accept(sessionId, req.req_id))}>Approve</button>}
-                {req.status === "Approved" && <button className="btn-primary" disabled={!!busy} onClick={() => act("Freezing…", () => api.freezeRequirement(sessionId, req.req_id))}><Lock size={14} /> Freeze</button>}
+                {req.status === "Approved" && req.doc && <button className="btn-primary" disabled={!!busy} onClick={() => act("Freezing…", () => api.freezeRequirement(sessionId, req.req_id))}><Lock size={14} /> Freeze</button>}
+                {req.status === "Approved" && !req.doc && <span className="muted small">Restructure before freezing</span>}
               </div>
+            </div>
+          )}
+
+          {req.status === "Frozen" && (
+            <div className="requirement-actions">
+              <span className="muted small">Frozen — locked for Technical Design.</span>
+              <button className="btn-secondary" disabled={!!busy} onClick={() => act("Unfreezing…", () => api.unfreeze(sessionId, req.req_id))}><LockOpen size={14} /> Unfreeze to change</button>
             </div>
           )}
 
@@ -112,11 +121,43 @@ function RequirementCard({ sessionId, req, onChange, open, onToggle }) {
   );
 }
 
-export default function BrdPrdManager({ session, requirements, setRequirements }) {
+export default function BrdPrdManager({ session, setSession, requirements, setRequirements }) {
   const [openIds, setOpenIds] = useState(() => new Set());
   const [bulk, setBulk] = useState(null); // {done, total}
   const [bulkError, setBulkError] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState(null);
+  const [applying, setApplying] = useState(null);
+  const [showArchive, setShowArchive] = useState(false);
   if (!session) return null;
+
+  async function runCheck() {
+    setChecking(true);
+    setCheckError(null);
+    try {
+      setSession(await api.checkConsistency(session.session_id));
+    } catch (e) {
+      setCheckError(e.message);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  // Send the suggestion as a review comment to every unfrozen document the
+  // issue names; each comes back as a revision to accept or discard.
+  async function applyIssue(issue, idx) {
+    setApplying(idx);
+    setCheckError(null);
+    const targets = issue.documents.filter((id) => requirements.find((r) => r.req_id === id && r.status !== "Frozen"));
+    for (const id of targets) {
+      try {
+        handleChange(await api.comment(session.session_id, id, `Cross-document review: ${issue.problem} Fix: ${issue.suggestion} Only change what concerns ${id}.`));
+      } catch (e) {
+        setCheckError(`${id}: ${e.message}`);
+      }
+    }
+    setApplying(null);
+  }
 
   function handleChange(updated) {
     setRequirements((reqs) => reqs.map((r) => (r.req_id === updated.req_id ? updated : r)));
@@ -168,6 +209,46 @@ export default function BrdPrdManager({ session, requirements, setRequirements }
         <p className="muted">No requirements drafted yet.</p>
       )}
 
+      <div className="manager-tools">
+        <button type="button" className="btn-secondary" disabled={checking || total < 2} onClick={runCheck}><GitCompare size={15} /> {checking ? "Checking overlaps…" : "Check overlaps across documents"}</button>
+        <ReopenScope session={session} setSession={setSession} requirements={requirements} />
+      </div>
+
+      {checkError && <div className="error-banner" role="alert">{checkError}</div>}
+
+      {session.consistency?.checked_at && (
+        <section className={"consistency" + (session.consistency.issues.length ? "" : " clean")}>
+          <div className="consistency-head">
+            <GitCompare size={18} aria-hidden="true" />
+            <div>
+              <strong>{session.consistency.issues.length ? `${session.consistency.issues.length} issue${session.consistency.issues.length > 1 ? "s" : ""} across documents` : "No overlap or conflicts found"}</strong>
+              {session.consistency.verdict && <p>{session.consistency.verdict}</p>}
+            </div>
+          </div>
+          {session.consistency.issues.length > 0 && (
+            <ol className="issue-list">
+              {session.consistency.issues.map((it, i) => {
+                const frozenIds = it.documents.filter((id) => requirements.find((r) => r.req_id === id && r.status === "Frozen"));
+                return (
+                  <li key={i}>
+                    <div className="issue-docs">{it.documents.map((d) => <span key={d} className="req-id">{d}</span>)}</div>
+                    <p className="issue-problem">{it.problem}</p>
+                    {it.suggestion && <p className="issue-fix"><strong>Suggested fix:</strong> {it.suggestion}</p>}
+                    <div className="requirement-actions">
+                      {frozenIds.length > 0 && <span className="muted small">{frozenIds.join(", ")} frozen — unfreeze to include</span>}
+                      <button className="btn-secondary sm" disabled={applying !== null || it.documents.length === frozenIds.length} onClick={() => applyIssue(it, i)}>
+                        <Wand2 size={14} /> {applying === i ? "Applying…" : "Apply fix as revisions"}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+          <p className="muted small">If most issues are about modules doing the same job, redefining the modules is quicker than fixing documents one by one.</p>
+        </section>
+      )}
+
       {legacy.length > 0 && (
         <div className="callout">
           <Wand2 size={20} aria-hidden="true" />
@@ -187,6 +268,21 @@ export default function BrdPrdManager({ session, requirements, setRequirements }
             {allOpen ? "Collapse all" : "Expand all"}
           </button>
         </div>
+      )}
+
+      {(session.requirement_archive || []).length > 0 && (
+        <section className="archive">
+          <button type="button" className="archive-toggle" onClick={() => setShowArchive((v) => !v)} aria-expanded={showArchive}>
+            <Archive size={15} aria-hidden="true" /> {session.requirement_archive.length} archived set{session.requirement_archive.length > 1 ? "s" : ""} from earlier scope
+            {showArchive ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          </button>
+          {showArchive && session.requirement_archive.map((a, i) => (
+            <div key={i} className="archive-set">
+              <p className="muted small">{new Date(a.archived_at).toLocaleString()} · {a.reason} · {a.modules.length} modules</p>
+              <ul>{a.requirements.map((r) => <li key={r.req_id}><span className="req-id">{r.req_id}</span> {r.title} <span className="muted small">({r.status})</span></li>)}</ul>
+            </div>
+          ))}
+        </section>
       )}
 
       <div className="requirement-feed">

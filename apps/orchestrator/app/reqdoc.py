@@ -40,7 +40,9 @@ DOC_SCHEMA = """Respond with ONLY one JSON object (no markdown fences):
 {
   "title": "<requirement title, max 8 words, plain language>",
   "summary": "<2-3 sentences: what this module lets people do and why it matters>",
-  "actors": ["<who is involved, e.g. 'Content creator', 'RelayReel (system)', 'GiveWings AI'>"],
+  "actors": ["<who is involved: people by role (e.g. 'Content creator', 'Admin'), the product itself as '<Product> (system)', its AI as '<Product> AI', or an outside party by its everyday name (e.g. 'WhatsApp'). NEVER internal components such as workers, services, engines, pipelines, orchestrators or APIs.>"],
+  "receives_from": "<which other module hands work to this one and what it receives, in one sentence; empty if it starts the journey>",
+  "hands_off_to": "<which other module this one hands work to and what it passes on, in one sentence; empty if it ends the journey>",
   "journey": [
     {"title": "<step heading, 2-6 words>", "detail": "<one plain sentence describing what happens>", "actor": "<one of the actors>"}
   ],
@@ -61,6 +63,7 @@ _TECH_PATTERNS = [
     (re.compile(r"\b[a-z][a-z0-9]*_[a-z0-9_]+\b"), "snake_case identifier"),
     (re.compile(r"\b[a-z]{2,}[A-Z][a-z]{2,}\w*\b"), "camelCase identifier"),
     (re.compile(r"\b(?:returns?|returning|respond(?:s|ing)? with)\s+[1-5]\d\d\b", re.I), "status code"),
+    (re.compile(r"\b(?:[A-Z][\w-]*\s){1,4}(?:Worker|Service|Engine|Pipeline|Orchestrator|Microservice|API|Gateway|Queue|Daemon)s?\b"), "internal component name"),
 ]
 
 
@@ -113,6 +116,8 @@ def parse_doc(data: dict) -> tuple[str, RequirementDoc]:
         acceptance_criteria=acs,
         out_of_scope=_strs(data.get("out_of_scope")),
         open_questions=_strs(data.get("open_questions")),
+        receives_from=_clean(data.get("receives_from")),
+        hands_off_to=_clean(data.get("hands_off_to")),
     )
     return _clean(data.get("title")), doc
 
@@ -123,6 +128,10 @@ def render_text(title: str, doc: RequirementDoc) -> str:
     out = [title, "", doc.summary]
     if doc.actors:
         out += ["", "Who is involved: " + ", ".join(doc.actors)]
+    if doc.receives_from:
+        out += ["Receives from: " + doc.receives_from]
+    if doc.hands_off_to:
+        out += ["Hands off to: " + doc.hands_off_to]
     if doc.journey:
         out += ["", "How it works:"]
         out += [f"{i}. {s.title}{f' ({s.actor})' if s.actor else ''} — {s.detail}" for i, s in enumerate(doc.journey, 1)]
@@ -152,7 +161,8 @@ async def generate_doc(prompt: str, fallback_title: str) -> tuple[str, Requireme
             f"does not belong in a business document ({'; '.join(leaks[:5])}). "
             "Rewrite it in business language with the same meaning and "
             "structure, removing every endpoint, path, table/queue/field "
-            f"name, identifier and status code.\n\n{json.dumps({'title': title, **doc.model_dump()}, ensure_ascii=False)}\n\n{DOC_SCHEMA}",
+            "name, identifier, status code and internal component name "
+            "(say who does it in plain words instead, e.g. 'the system').\n\n{json.dumps({'title': title, **doc.model_dump()}, ensure_ascii=False)}\n\n{DOC_SCHEMA}",
             system=system,
         )
         try:

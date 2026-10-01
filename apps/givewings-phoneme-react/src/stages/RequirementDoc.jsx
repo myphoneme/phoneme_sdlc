@@ -38,6 +38,13 @@ export default function RequirementDoc({ doc, compact = false }) {
         </div>
       )}
 
+      {(doc.receives_from || doc.hands_off_to) && (
+        <div className="handoffs">
+          {doc.receives_from && <div><span>Receives from</span><p>{doc.receives_from}</p></div>}
+          {doc.hands_off_to && <div><span>Hands off to</span><p>{doc.hands_off_to}</p></div>}
+        </div>
+      )}
+
       {doc.journey?.length > 0 && (
         <section className="req-sec">
           <h4 className="req-sec-title">How it works</h4>

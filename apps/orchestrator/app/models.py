@@ -83,6 +83,7 @@ class ModuleSpec(BaseModel):
     name: str
     description: str = ""
     platform_core: bool = False
+    merged_from: list[str] = []  # set when an AI consolidation proposed it
 
 
 class DomainCheck(BaseModel):
@@ -152,6 +153,9 @@ class SessionState(BaseModel):
     module_specs: list[ModuleSpec] = []
     module_flows: list[ModuleFlow] = []
     generation: GenerationProgress = GenerationProgress()
+    requirement_archive: list["ArchivedRequirementSet"] = []
+    consistency: Optional["ConsistencyReport"] = None
+    scope_revision: int = 0
     # discovery -> confirm -> research -> identity -> freeze -> flow -> generating -> manager
     stage: str = "discovery"
 
@@ -201,6 +205,27 @@ class AcceptanceCriterion(BaseModel):
     priority: str = "Must"  # Must | Should | Could
 
 
+class ArchivedRequirementSet(BaseModel):
+    """A full set of requirements set aside when scope was redefined --
+    kept for reference/audit, never silently thrown away."""
+    archived_at: str
+    reason: str = ""
+    modules: list[str] = []
+    requirements: list["Requirement"] = []
+
+
+class ConsistencyIssue(BaseModel):
+    documents: list[str] = []  # req_ids involved
+    problem: str
+    suggestion: str = ""
+
+
+class ConsistencyReport(BaseModel):
+    checked_at: Optional[str] = None
+    verdict: str = ""
+    issues: list[ConsistencyIssue] = []
+
+
 class RequirementDoc(BaseModel):
     """Structured, stakeholder-readable requirement (2026-09-30 review:
     prose paragraphs laced with API paths and table names were unreadable
@@ -214,6 +239,8 @@ class RequirementDoc(BaseModel):
     acceptance_criteria: list[AcceptanceCriterion] = []
     out_of_scope: list[str] = []
     open_questions: list[str] = []
+    receives_from: str = ""
+    hands_off_to: str = ""
 
 
 class Requirement(BaseModel):
@@ -292,3 +319,18 @@ class FlowStepsUpdateRequest(BaseModel):
     session_id: str
     module: str
     steps: list[str]
+
+
+class ConsolidateRequest(BaseModel):
+    session_id: str
+    instruction: str = ""
+    target: Optional[int] = None
+
+
+class ReopenScopeRequest(BaseModel):
+    session_id: str
+    reason: str = ""
+
+
+SessionState.model_rebuild()
+ArchivedRequirementSet.model_rebuild()
