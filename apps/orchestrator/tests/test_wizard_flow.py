@@ -29,6 +29,8 @@ async def fake(feature, prompt, system=None):
             {"name": "Capture & Catalogue", "description": "Forwarding in, sorted by topic", "platform_core": False, "merged_from": ["Ingestion Vault", "Genre & Topic Catalogue"]},
             {"name": "Repurpose Studio", "description": "text/image/video", "platform_core": False, "merged_from": ["Repurpose Studio"]},
             {"name": "Auth & Identity", "description": "login", "platform_core": True}]})}
+    if f == ai_router.Feature.MODULE_BREAKDOWN and "define module boundaries" in (system or ""):
+        return {"text": json.dumps({"modules": [{"name": "genre & topic catalogue", "starts_when": "Items are in the vault", "outcome": "Items are filed by topic"}, {"name": "Repurpose Studio", "starts_when": "A topic is chosen", "outcome": "Drafts exist"}]})}
     if f == ai_router.Feature.MODULE_BREAKDOWN:
         return {"text": '{"modules":[{"name":"Ingestion Vault","description":"captures forwards","platform_core":false},{"name":"Catalogue","description":"genre/topic","platform_core":false},{"name":"Auth & Identity","description":"login","platform_core":true}]}'}
     if f == ai_router.Feature.TECH_DESIGN_GENERATION:
@@ -122,6 +124,13 @@ async def run():
         s = await post("/api/wizard/flows/update", {"session_id": sid, "module": m, "steps": ["A", " ", "B edited", "C new"]})
         assert next(f for f in s["module_flows"] if f["module"] == m)["steps"] == ["A", "B edited", "C new"]
         assert any("STARTS when: User sets up their vault" in p for p in flow_prompts), "boundary missing from flow prompt"
+        s = await post("/api/wizard/modules/suggest-boundaries", {"session_id": sid})
+        b = {m["name"]: (m["starts_when"], m["outcome"]) for m in s["module_specs"] if m["kind"] == "business"}
+        assert b["Ingestion Vault"][0] == "User sets up their vault" and b["Genre & Topic Catalogue"] == ("Items are in the vault", "Items are filed by topic"), b
+        from app import store as _st
+        st = await _st.get_session(sid); st.module_flows = [f for f in st.module_flows if not f.standard]; await _st.save_session(st)
+        s = await post("/api/wizard/flows/generate", {"session_id": sid})
+        assert sum(1 for f in s["module_flows"] if f["standard"]) == 4, [f["module"] for f in s["module_flows"]]
         s = await post("/api/wizard/flows/redraft", {"session_id": sid, "module": m})
         rd = next(f for f in s["module_flows"] if f["module"] == m)
         assert rd["status"] == "Draft" and rd["steps"][0].startswith("User:") and not any("POST" in x for x in rd["steps"]), rd["steps"]

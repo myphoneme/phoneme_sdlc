@@ -633,3 +633,7 @@ button.journey-link:hover { background: #faf6f2; }
 .boundary-bar.editing .boundary-fields { margin-top: 0; margin-bottom: 8px; }
 .boundary-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 760px) { .boundary-fields { grid-template-columns: minmax(0, 1fr); } }
+
+.boundary-callout { align-items: center; gap: 14px; }
+.boundary-callout p { margin: 4px 0 0; }
+@media (max-width: 760px) { .boundary-callout { flex-direction: column; align-items: stretch; } }

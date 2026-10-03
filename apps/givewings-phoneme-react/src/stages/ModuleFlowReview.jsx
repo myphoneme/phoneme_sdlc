@@ -51,10 +51,15 @@ function BoundaryBar({ sessionId, spec, flow, busy, act }) {
   const [editing, setEditing] = useState(false);
   const [sw, setSw] = useState(spec?.starts_when || "");
   const [oc, setOc] = useState(spec?.outcome || "");
+  useEffect(() => { if (!editing) { setSw(spec?.starts_when || ""); setOc(spec?.outcome || ""); } }, [spec?.starts_when, spec?.outcome, editing]);
   if (!spec) return null;
   const has = spec.starts_when || spec.outcome;
   const save = async () => {
-    if (await act(() => api.setBoundary(sessionId, spec.name, sw.trim(), oc.trim()))) setEditing(false);
+    const ok = await act(async () => {
+      const s = await api.setBoundary(sessionId, spec.name, sw.trim(), oc.trim());
+      return flow.status === "Approved" ? s : api.redraftFlow(sessionId, flow.module);
+    });
+    if (ok) setEditing(false);
   };
   if (editing) {
     return (
@@ -65,7 +70,7 @@ function BoundaryBar({ sessionId, spec, flow, busy, act }) {
         </div>
         <div className="requirement-actions">
           <button className="btn-secondary sm" disabled={busy} onClick={() => { setSw(spec.starts_when || ""); setOc(spec.outcome || ""); setEditing(false); }}><X size={13} /> Cancel</button>
-          <button className="btn-primary sm-primary" disabled={busy} onClick={save}><Save size={13} /> Save boundary</button>
+          <button className="btn-primary sm-primary" disabled={busy} onClick={save}><Save size={13} /> {flow.status === "Approved" ? "Save boundary" : "Save & redraft flow"}</button>
         </div>
       </div>
     );
@@ -199,8 +204,45 @@ export default function ModuleFlowReview({ session, setSession }) {
     ? specs.filter((m) => m.kind !== "standard").length
     : (session?.modules || []).filter((m) => !m.toLowerCase().startsWith("platform-core")).length;
 
+  // Any module without a flow (incl. standard modules added after scope was
+  // frozen) triggers drafting -- not just a lower count.
+  const flowNames = new Set((session?.module_flows || []).map((f) => f.module));
+  const missing = (session?.modules || []).filter((m) => !flowNames.has(m) && !m.toLowerCase().startsWith("platform-core"));
+  const bizSpecs = specs.filter((m) => m.kind !== "standard");
+  const unbounded = bizSpecs.filter((m) => !(m.starts_when && m.outcome));
+  const [bulk, setBulk] = useState(null); // {done, total} while redrafting all
+
+  async function suggestBoundaries() {
+    setLoading(true);
+    setError(null);
+    try {
+      setSession(await api.suggestBoundaries(session.session_id));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function redraftAll() {
+    const targets = reviewable.filter((f) => f.status !== "Approved" && !f.revised_steps);
+    setError(null);
+    setBulk({ done: 0, total: targets.length });
+    let latest = null;
+    for (let i = 0; i < targets.length; i++) {
+      try {
+        latest = await api.redraftFlow(session.session_id, targets[i].module);
+        setSession(latest);
+      } catch (e) {
+        setError(`${targets[i].module}: ${e.message}`);
+      }
+      setBulk({ done: i + 1, total: targets.length });
+    }
+    setBulk(null);
+  }
+
   useEffect(() => {
-    if (session && reviewable.length < expected) {
+    if (session && missing.length > 0) {
       setLoading(true);
       // Flows are saved one by one on the server; poll so each appears as
       // soon as it is drafted instead of waiting for the whole batch.
@@ -244,10 +286,30 @@ export default function ModuleFlowReview({ session, setSession }) {
       {loading && (
         <div className="working" role="status">
           <span className="spinner" aria-hidden="true" />
-          <div><strong>Drafting sequence flows — {reviewable.length} of {expected} ready</strong><p>You can start reviewing the ones below while the rest are drafted.</p></div>
+          <div><strong>{unbounded.length && !missing.length ? "Working…" : `Drafting sequence flows — ${reviewable.length} of ${expected} ready`}</strong><p>You can start reviewing the ones below while the rest are drafted.</p></div>
         </div>
       )}
       {error && <div className="error-banner" role="alert">{error}</div>}
+
+      {!loading && reviewable.length > 0 && (
+        unbounded.length > 0 ? (
+          <div className="callout warn-callout boundary-callout">
+            <div style={{ flex: 1 }}>
+              <strong>{unbounded.length} of {bizSpecs.length} modules have no boundary</strong>
+              <p>Without a start and an outcome, each flow tends to retell the whole product. Let GiveWings AI suggest where each module starts and ends (you can edit them), then redraft the flows.</p>
+            </div>
+            <button className="btn-primary" disabled={!!bulk} onClick={suggestBoundaries}>Suggest boundaries</button>
+          </div>
+        ) : reviewable.some((f) => f.status !== "Approved" && !f.revised_steps) && (
+          <div className="callout boundary-callout">
+            <div style={{ flex: 1 }}>
+              <strong>{bulk ? `Redrafting flows — ${bulk.done} of ${bulk.total} done` : "Every module has a boundary"}</strong>
+              <p>{bulk ? "Each flow is rewritten to run only from its start to its outcome." : "Check the boundaries below, then redraft so each flow stays inside its own module. Approved flows are left alone."}</p>
+            </div>
+            <button className="btn-primary" disabled={!!bulk} onClick={redraftAll}>{bulk ? "Redrafting…" : "Redraft all within boundaries"}</button>
+          </div>
+        )
+      )}
 
       {reviewable.length > 0 && (
         <div className="review-summary">

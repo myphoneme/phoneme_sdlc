@@ -379,7 +379,28 @@ async def generate_flows(req: FreezeRequest):
         return await _generate_flows(state)
 
 
+def _ensure_standard_flows(state: SessionState) -> bool:
+    """Scopes frozen before standard modules existed have no standard
+    flows; add them (and the modules) so nothing is silently missing."""
+    _sync_module_names(state)
+    have = {f.module for f in state.module_flows}
+    added = False
+    for m in state.module_specs:
+        if m.kind == "standard" and m.name not in have:
+            state.module_flows.append(ModuleFlow(
+                module=m.name, steps=foundation.flow_steps(m.standard_key, state.selected_name or "The product"),
+                status="Approved", standard=True,
+            ))
+            added = True
+    keep = set(state.modules)
+    before = len(state.module_flows)
+    state.module_flows = [f for f in state.module_flows if f.module in keep]
+    return added or len(state.module_flows) != before
+
+
 async def _generate_flows(state: SessionState) -> SessionState:
+    if _ensure_standard_flows(state):
+        await store.save_session(state)
     research_context = _research_context(state)
     existing = {f.module for f in state.module_flows}
 
@@ -505,6 +526,49 @@ async def set_module_boundary(req: ModuleBoundaryRequest):
     spec.starts_when, spec.outcome = req.starts_when.strip(), req.outcome.strip()
     await store.save_session(state)
     return state
+
+
+@router.post("/modules/suggest-boundaries", response_model=SessionState)
+async def suggest_boundaries(req: SessionRequest):
+    """Fill in missing 'starts when' / 'outcome' for product modules from
+    their descriptions, chained so each module starts where the previous
+    one ends. Only empty boundaries are filled; the user then edits."""
+    async with session_lock(req.session_id, "boundaries"):
+        state = await store.get_session(req.session_id)
+        if not state:
+            raise HTTPException(404, "session not found")
+        if state.stage not in ("freeze", "flow"):
+            raise HTTPException(409, "boundaries can be changed only before flows are frozen")
+        biz = [m for m in state.module_specs if m.kind != "standard"]
+        if not any(not (m.starts_when and m.outcome) for m in biz):
+            return state
+        listing = "\n".join(f"{i+1}. {m.name}: {_short(m.description, 120) or 'no description'}" for i, m in enumerate(biz))
+        result = await ai_router.generate(
+            ai_router.Feature.MODULE_BREAKDOWN,
+            f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n\n"
+            f"Product modules, in journey order:\n{listing}\n\n"
+            "For each module give its boundary: 'starts_when' = the trigger that starts it "
+            "(one short phrase) and 'outcome' = the concrete result it ends with (one short "
+            "phrase). Chain them: each module starts where the previous module's outcome "
+            "ends, and no two modules cover the same steps. Business language. Respond with "
+            'ONLY JSON: {"modules": [{"name": "<exact name>", "starts_when": "...", "outcome": "..."}]}',
+            system="You are a pragmatic business analyst. Your job is to define module boundaries. JSON only.",
+        )
+        try:
+            data = _extract_json(result["text"])
+        except (ValueError, json.JSONDecodeError):
+            raise HTTPException(502, "the AI did not return usable boundaries — try again")
+        lst = [m for m in data.get("modules", []) if isinstance(m, dict)]
+        got = {str(m.get("name", "")).strip().lower(): m for m in lst}
+        state = await store.get_session(req.session_id) or state
+        for i, m in enumerate(x for x in state.module_specs if x.kind != "standard"):
+            g = got.get(m.name.lower()) or (lst[i] if i < len(lst) else {})
+            if not m.starts_when:
+                m.starts_when = _strip_markdown(str(g.get("starts_when") or ""))
+            if not m.outcome:
+                m.outcome = _strip_markdown(str(g.get("outcome") or ""))
+        await store.save_session(state)
+        return state
 
 
 @router.post("/flows/redraft", response_model=SessionState)
@@ -636,6 +700,8 @@ async def freeze_flows(req: FlowFreezeRequest):
     state = await store.get_session(req.session_id)
     if not state:
         raise HTTPException(404, "session not found")
+    if _ensure_standard_flows(state):
+        await store.save_session(state)
     reviewable = [f for f in state.module_flows if not f.standard and not _is_platform_core(f.module)]
     not_approved = [f.module for f in reviewable if f.status != "Approved"]
     if not_approved:

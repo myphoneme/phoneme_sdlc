@@ -57,6 +57,7 @@ export const api = {
   freezeFlows: (session_id) => post("/wizard/flows/freeze", { session_id }),
   setBoundary: (session_id, module, starts_when, outcome) => post("/wizard/modules/boundary", { session_id, module, starts_when, outcome }),
   redraftFlow: (session_id, module) => post("/wizard/flows/redraft", { session_id, module }),
+  suggestBoundaries: (session_id) => post("/wizard/modules/suggest-boundaries", { session_id }),
   generate: (session_id) => post("/wizard/generate", { session_id }),
   listRequirements: (session_id) => get(`/brdprd/${session_id}/requirements`),
   comment: (session_id, req_id, comment) => post(`/brdprd/${session_id}/comment`, { req_id, comment }),
