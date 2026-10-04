@@ -11,7 +11,14 @@ function statusClass(status) {
 }
 
 function RequirementCard({ sessionId, req, onChange, open, onToggle }) {
-  const [comment, setComment] = useState("");
+  // Unsent review comments survive a refresh (2026-10-04: a typed comment
+  // was left behind when the reviewer clicked Approve).
+  const draftKey = `gw_comment_${sessionId}_${req.req_id}`;
+  const [comment, setCommentState] = useState(() => { try { return localStorage.getItem(draftKey) || ""; } catch { return ""; } });
+  const setComment = (v) => {
+    setCommentState(v);
+    try { if (v.trim()) localStorage.setItem(draftKey, v); else localStorage.removeItem(draftKey); } catch { /* storage unavailable */ }
+  };
   const [busy, setBusy] = useState("");
   const [error, setError] = useState(null);
   const pending = !!(req.revised_doc || req.revised_body);
@@ -32,7 +39,7 @@ function RequirementCard({ sessionId, req, onChange, open, onToggle }) {
 
   const submitComment = async () => {
     if (!comment.trim()) return;
-    if (await act("Reworking…", () => api.comment(sessionId, req.req_id, comment.trim()))) setComment("");
+    if (await act("Applying your comment…", () => api.comment(sessionId, req.req_id, comment.trim()))) setComment("");
   };
 
   const counts = req.doc
@@ -71,7 +78,7 @@ function RequirementCard({ sessionId, req, onChange, open, onToggle }) {
 
           {pending && (
             <div className="diff-block">
-              <div className="diff-label"><Sparkles size={13} aria-hidden="true" /> Proposed revision{req.revised_title && req.revised_title !== req.title ? ` — “${req.revised_title}”` : ""}</div>
+              <div className="diff-label"><Sparkles size={13} aria-hidden="true" /> Revised with your comment — review, then Accept to update the document{req.revised_title && req.revised_title !== req.title ? ` — “${req.revised_title}”` : ""}</div>
               {req.revised_doc ? <RequirementDoc doc={req.revised_doc} compact /> : <LegacyBody text={req.revised_body} />}
               <div className="requirement-actions">
                 <button className="btn-secondary" disabled={!!busy} onClick={() => act("Discarding…", () => api.discard(sessionId, req.req_id))}>Discard</button>
@@ -92,16 +99,28 @@ function RequirementCard({ sessionId, req, onChange, open, onToggle }) {
                     if (!busy && comment.trim()) submitComment();
                   }
                 }}
-                placeholder="Ask for a change in plain words — e.g. 'add a rule that users can delete an item permanently'… (Shift+Enter for a new line)"
+                placeholder="Request a change in plain words — e.g. 'allow sign-in with Google, Apple, Meta and X; two-factor only for paid users'. Then click Apply comment. (Shift+Enter for a new line)"
                 disabled={!!busy}
                 rows={2}
               />
+              {busy === "Applying your comment…" && (
+                <div className="working inline" role="status"><span className="spinner sm" aria-hidden="true" /><span>GiveWings AI is applying your comment — the revised document will appear above for you to accept or discard.</span></div>
+              )}
               <div className="requirement-actions">
-                {!req.doc && <button className="btn-secondary" disabled={!!busy} onClick={() => act("Restructuring…", () => api.restructure(sessionId, req.req_id))}><Wand2 size={15} /> Restructure</button>}
-                <button className="btn-secondary" disabled={!!busy || !comment.trim()} onClick={submitComment}>Rework with AI</button>
-                {req.status === "Draft" && <button className="btn-primary" disabled={!!busy} onClick={() => act("Approving…", () => api.accept(sessionId, req.req_id))}>Approve</button>}
-                {req.status === "Approved" && req.doc && <button className="btn-primary" disabled={!!busy} onClick={() => act("Freezing…", () => api.freezeRequirement(sessionId, req.req_id))}><Lock size={14} /> Freeze</button>}
-                {req.status === "Approved" && !req.doc && <span className="muted small">Restructure before freezing</span>}
+                {comment.trim() ? (
+                  <>
+                    <span className="muted small comment-hint">Apply your comment first — approving or freezing ignores unsent comments.</span>
+                    <button className="btn-secondary" disabled={!!busy} onClick={() => setComment("")}>Clear</button>
+                    <button className="btn-primary" disabled={!!busy} onClick={submitComment}><Sparkles size={14} /> {busy === "Applying your comment…" ? "Applying…" : "Apply comment"}</button>
+                  </>
+                ) : (
+                  <>
+                    {!req.doc && <button className="btn-secondary" disabled={!!busy} onClick={() => act("Restructuring…", () => api.restructure(sessionId, req.req_id))}><Wand2 size={15} /> Restructure</button>}
+                    {req.status === "Draft" && <button className="btn-primary" disabled={!!busy} onClick={() => act("Approving…", () => api.accept(sessionId, req.req_id))}>Approve as is</button>}
+                    {req.status === "Approved" && req.doc && <button className="btn-primary" disabled={!!busy} onClick={() => act("Freezing…", () => api.freezeRequirement(sessionId, req.req_id))}><Lock size={14} /> Freeze</button>}
+                    {req.status === "Approved" && !req.doc && <span className="muted small">Restructure before freezing</span>}
+                  </>
+                )}
               </div>
             </div>
           )}

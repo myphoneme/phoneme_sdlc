@@ -637,3 +637,6 @@ button.journey-link:hover { background: #faf6f2; }
 .boundary-callout { align-items: center; gap: 14px; }
 .boundary-callout p { margin: 4px 0 0; }
 @media (max-width: 760px) { .boundary-callout { flex-direction: column; align-items: stretch; } }
+
+.working.inline { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; padding: 10px 12px; font-size: 13px; }
+.comment-hint { flex: 1; color: #8a5a00; font-weight: 700; }
