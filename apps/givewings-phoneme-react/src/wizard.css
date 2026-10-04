@@ -640,3 +640,26 @@ button.journey-link:hover { background: #faf6f2; }
 
 .working.inline { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; padding: 10px 12px; font-size: 13px; }
 .comment-hint { flex: 1; color: #8a5a00; font-weight: 700; }
+
+/* --- Open questions & review conversation (2026-10-04) --- */
+.oq-panel { margin: 16px 0; padding: 16px; border: 1px solid #f0d48a; border-radius: 14px; background: #fffbef; }
+.oq-head { display: flex; gap: 10px; align-items: flex-start; }
+.oq-head svg { color: #a26a00; flex-shrink: 0; margin-top: 2px; }
+.oq-head strong { font: 800 15px Manrope, sans-serif; color: #171717; }
+.oq-head p { margin: 4px 0 0; font-size: 13px; color: #3d3f44; }
+.oq-list { list-style: none; margin: 14px 0 10px; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.oq-list li { padding: 12px; border: 1px solid #ece4cf; border-radius: 10px; background: #fff; }
+.oq-list li.answered { border-color: #b6e0c6; }
+.oq-list li.deferred { border-color: #d9d4ea; background: #faf9fd; }
+.oq-q { margin: 0 0 8px; font-size: 14px; line-height: 1.5; color: #171717; }
+.oq-list textarea { width: 100%; padding: 9px 11px; border: 1px solid #e5e2dd; border-radius: 8px; font: 500 13.5px "DM Sans", sans-serif; resize: vertical; }
+.oq-list textarea:focus { outline: 2px solid #ff7200; outline-offset: 1px; }
+.oq-defer { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12.5px; font-weight: 700; color: #4b4f8a; cursor: pointer; }
+.review-thread { margin: 12px 0; }
+.decision-log { list-style: none; margin: 10px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.decision-log li { display: flex; gap: 8px; padding: 8px 10px; border-radius: 8px; background: #f6f5f2; font-size: 13px; }
+.decision-log li svg { flex-shrink: 0; margin-top: 2px; color: #187e4e; }
+.decision-log li div { display: flex; flex-direction: column; gap: 2px; }
+.decision-log li span { color: #3d3f44; }
+.thread-log { max-height: 360px; overflow: auto; margin-top: 8px; }
+.thread-log .msg-bubble { white-space: pre-wrap; }

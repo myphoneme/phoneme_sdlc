@@ -270,6 +270,34 @@ class Requirement(BaseModel):
     revised_title: Optional[str] = None
     status_before_revision: Optional[str] = None
     standard_version: str = ""  # set for GiveWings standard modules
+    # 2026-10-04: open questions must be answered (or explicitly deferred)
+    # by the product owner before a document can be approved or frozen.
+    thread: list["ReviewMessage"] = []
+    decisions: list["Decision"] = []
+
+
+class ReviewMessage(BaseModel):
+    role: str  # owner | assistant
+    text: str
+    at: str = ""
+
+
+class Decision(BaseModel):
+    question: str
+    answer: str = ""
+    deferred: bool = False
+    at: str = ""
+
+
+class AnswerItem(BaseModel):
+    question: str
+    answer: str = ""
+    defer: bool = False
+
+
+class AnswersRequest(BaseModel):
+    req_id: str
+    answers: list[AnswerItem]
 
 
 class CommentRequest(BaseModel):

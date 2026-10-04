@@ -62,6 +62,7 @@ export const api = {
   listRequirements: (session_id) => get(`/brdprd/${session_id}/requirements`),
   comment: (session_id, req_id, comment) => post(`/brdprd/${session_id}/comment`, { req_id, comment }),
   accept: (session_id, req_id) => post(`/brdprd/${session_id}/accept`, { req_id }),
+  answerQuestions: (session_id, req_id, answers) => post(`/brdprd/${session_id}/answers`, { req_id, answers }),
   discard: (session_id, req_id) => post(`/brdprd/${session_id}/discard`, { req_id }),
   consolidateModules: (session_id, instruction, target) => post("/wizard/modules/consolidate", { session_id, instruction, target }),
   reopenScope: (session_id, reason) => post("/wizard/reopen-scope", { session_id, reason }),

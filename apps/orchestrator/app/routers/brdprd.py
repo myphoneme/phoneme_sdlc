@@ -15,9 +15,21 @@ from datetime import datetime, timezone
 from .. import ai_router, reqdoc, store
 from ..locks import session_lock
 from ..models import (
-    AcceptRequest, CommentRequest, ConsistencyIssue, ConsistencyReport,
-    Requirement, SessionState,
+    AcceptRequest, AnswersRequest, CommentRequest, ConsistencyIssue, ConsistencyReport,
+    Decision, Requirement, ReviewMessage, SessionState,
 )
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _norm(q: str) -> str:
+    return " ".join((q or "").lower().split()).rstrip("?. ")
+
+
+def _open_questions(r: Requirement) -> list[str]:
+    return list(r.doc.open_questions) if r.doc else []
 
 router = APIRouter(prefix="/api/brdprd", tags=["brdprd"])
 
@@ -62,11 +74,17 @@ async def comment_and_regenerate(session_id: str, req: CommentRequest):
         r = await store.get_requirement(session_id, req.req_id)
         if not r:
             raise HTTPException(404, "requirement not found")
-        return await _propose(
+        r.thread.append(ReviewMessage(role="owner", text=req.comment, at=_now()))
+        r = await _propose(
             session_id, r,
             f"Reviewer comment: {req.comment}\n\nRewrite the requirement to address "
             "the comment. Keep everything that is still correct.",
         )
+        r.thread.append(ReviewMessage(role="assistant", at=_now(), text=(
+            "I've drafted a revision for your comment — review it above and accept or discard it."
+        )))
+        await store.add_requirement(session_id, r)
+        return r
 
 
 @router.post("/{session_id}/restructure/{req_id}", response_model=Requirement)
@@ -95,7 +113,11 @@ async def accept_revision(session_id: str, req: AcceptRequest):
     r = await store.get_requirement(session_id, req.req_id)
     if not r:
         raise HTTPException(404, "requirement not found")
-    if r.revised_body or r.revised_doc:
+    revising = bool(r.revised_body or r.revised_doc)
+    if not revising and r.doc and r.doc.open_questions:
+        n = len(r.doc.open_questions)
+        raise HTTPException(409, f"answer or defer the {n} open question{'s' if n > 1 else ''} before approving")
+    if revising:
         r.body = r.revised_body or r.body
         r.doc = r.revised_doc or r.doc
         r.title = r.revised_title or r.title
@@ -103,9 +125,82 @@ async def accept_revision(session_id: str, req: AcceptRequest):
     r.revised_doc = None
     r.revised_title = None
     r.status_before_revision = None
-    r.status = "Approved"
+    # Accepting a revision that still has open questions keeps it in Draft.
+    r.status = "Draft" if _open_questions(r) else "Approved"
     await store.add_requirement(session_id, r)
     return r
+
+
+@router.post("/{session_id}/answers", response_model=Requirement)
+async def answer_open_questions(session_id: str, req: AnswersRequest):
+    """The product owner answers (or defers) open questions; the document
+    is revised straight away with those decisions. If an answer raises a
+    genuine new decision, it comes back as a follow-up question, so review
+    continues as a conversation until nothing is open."""
+    async with session_lock(session_id, f"req:{req.req_id}"):
+        state = await store.get_session(session_id)
+        r = await store.get_requirement(session_id, req.req_id)
+        if not state or not r:
+            raise HTTPException(404, "requirement not found")
+        if not r.doc:
+            raise HTTPException(400, "restructure this requirement first")
+        if r.revised_doc or r.revised_body:
+            raise HTTPException(409, "accept or discard the pending revision first")
+        if r.status == "Frozen":
+            raise HTTPException(409, "unfreeze the document to change it")
+        items = [a for a in req.answers if a.question.strip() and (a.defer or a.answer.strip())]
+        if not items:
+            raise HTTPException(400, "answer or defer at least one question")
+        answered = [a for a in items if not a.defer]
+        deferred = [a for a in items if a.defer]
+        lines = []
+        for a in answered:
+            lines.append(f"Q: {a.question}\nA: {a.answer.strip()}")
+        for a in deferred:
+            lines.append(f"Q: {a.question}\nDEFERRED to a later release" + (f" -- {a.answer.strip()}" if a.answer.strip() else ""))
+        title, doc = await reqdoc.generate_doc(
+            f"Product: {state.selected_name}\nConcept: {state.concept_summary}\nModule: {r.module}\n\n"
+            f"Current requirement:\n{_current_as_text(r)}\n\n"
+            "The product owner has answered open questions:\n\n" + "\n\n".join(lines) + "\n\n"
+            "Revise the requirement: write each answer into the section where it belongs "
+            "(journey steps, business rules, acceptance criteria) as a firm decision. Remove "
+            "every answered or deferred question from open_questions. Record each deferred "
+            "question in out_of_scope as 'Deferred to a later release: <topic>'. Keep every "
+            "other open question unchanged. Add a NEW open question only if an answer "
+            "creates a real decision the owner still has to make (at most 2). Keep "
+            "everything else that is still correct.",
+            fallback_title=r.title,
+        )
+        # Enforce the decisions even if the model forgets one.
+        closed = {_norm(a.question) for a in items}
+        doc.open_questions = [q for q in doc.open_questions if _norm(q) not in closed]
+        for a in deferred:
+            topic = a.question.strip().rstrip("?")
+            if not any(_norm(topic)[:40] in _norm(x) for x in doc.out_of_scope):
+                doc.out_of_scope.append(f"Deferred to a later release: {topic}" + (f" ({a.answer.strip()})" if a.answer.strip() else ""))
+        before = set(_norm(q) for q in _open_questions(r))
+        new_qs = [q for q in doc.open_questions if _norm(q) not in before]
+        r.title, r.doc, r.body = title or r.title, doc, reqdoc.render_text(title or r.title, doc)
+        now = _now()
+        for a in items:
+            r.decisions.append(Decision(question=a.question.strip(), answer=a.answer.strip(), deferred=a.defer, at=now))
+        r.thread.append(ReviewMessage(role="owner", at=now, text="\n\n".join(lines)))
+        left = len(doc.open_questions)
+        msg = f"Updated the document with {len(answered)} answer{'s' if len(answered) != 1 else ''}"
+        if deferred:
+            msg += f" and {len(deferred)} deferred question{'s' if len(deferred) != 1 else ''} (listed under Out of scope)"
+        msg += "."
+        if new_qs:
+            msg += f" Your answers raised {len(new_qs)} follow-up question{'s' if len(new_qs) != 1 else ''}: " + " ".join(new_qs)
+        elif left:
+            msg += f" {left} open question{'s' if left != 1 else ''} still need an answer."
+        else:
+            msg += " No open questions remain — review the document and approve it."
+        r.thread.append(ReviewMessage(role="assistant", at=now, text=msg))
+        if r.status == "Approved" and left:
+            r.status = "Draft"
+        await store.add_requirement(session_id, r)
+        return r
 
 
 @router.post("/{session_id}/discard", response_model=Requirement)
@@ -131,6 +226,10 @@ async def freeze_requirement(session_id: str, req_id: str):
         raise HTTPException(400, "accept or discard the pending revision before freezing")
     if not r.doc:
         raise HTTPException(400, "restructure this requirement into the readable format before freezing it")
+    if r.doc.open_questions:
+        raise HTTPException(409, "answer or defer every open question before freezing")
+    if r.status != "Approved":
+        raise HTTPException(409, "approve the document before freezing it")
     r.status = "Frozen"
     await store.add_requirement(session_id, r)
     return r

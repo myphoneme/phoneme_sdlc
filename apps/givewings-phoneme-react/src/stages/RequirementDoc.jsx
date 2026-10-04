@@ -25,7 +25,7 @@ export function FlowStrip({ journey }) {
   );
 }
 
-export default function RequirementDoc({ doc, compact = false }) {
+export default function RequirementDoc({ doc, compact = false, hideQuestions = false }) {
   const actors = doc.actors || [];
   return (
     <div className={"req-doc" + (compact ? " compact" : "")}>
@@ -93,7 +93,7 @@ export default function RequirementDoc({ doc, compact = false }) {
         </section>
       )}
 
-      {(doc.out_of_scope?.length > 0 || doc.open_questions?.length > 0) && (
+      {(doc.out_of_scope?.length > 0 || (!hideQuestions && doc.open_questions?.length > 0)) && (
         <div className="req-side">
           {doc.out_of_scope?.length > 0 && (
             <section className="req-note">
@@ -101,7 +101,7 @@ export default function RequirementDoc({ doc, compact = false }) {
               <ul className="research-bullet-list">{doc.out_of_scope.map((x, i) => <li key={i}>{x}</li>)}</ul>
             </section>
           )}
-          {doc.open_questions?.length > 0 && (
+          {!hideQuestions && doc.open_questions?.length > 0 && (
             <section className="req-note warn">
               <h4 className="req-sec-title"><CircleHelp size={15} aria-hidden="true" /> Open questions</h4>
               <ul className="research-bullet-list">{doc.open_questions.map((x, i) => <li key={i}>{x}</li>)}</ul>

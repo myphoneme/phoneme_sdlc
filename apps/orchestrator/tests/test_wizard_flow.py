@@ -192,16 +192,34 @@ async def run():
         legacy2 = Requirement(req_id="RELA-901", module="x", title="Old", body="prose", status="Approved")
         await store.add_requirement(sid, legacy2)
         await post(f"/api/brdprd/{sid}/freeze/RELA-901", {}, 400)
+        # --- open questions gate approve/freeze; answers revise the document
+        from app.models import RequirementDoc
+        oq = Requirement(req_id="RELA-950", module="Ingestion Vault", title="Q doc", body="x", status="Draft",
+                         doc=RequirementDoc(summary="s", open_questions=["Should 2FA be required for paid users?", "What is the inactivity timeout?"]))
+        await store.add_requirement(sid, oq)
+        await post(f"/api/brdprd/{sid}/accept", {"req_id": "RELA-950"}, 409)
+        await post(f"/api/brdprd/{sid}/freeze/RELA-950", {}, 409)
+        rr = await post(f"/api/brdprd/{sid}/answers", {"req_id": "RELA-950", "answers": [
+            {"question": "Should 2FA be required for paid users?", "answer": "Yes, paid users only"},
+            {"question": "What is the inactivity timeout?", "answer": "decide with pilot users", "defer": True}]})
+        assert rr["doc"]["open_questions"] == [], rr["doc"]["open_questions"]
+        assert any("Deferred to a later release" in x for x in rr["doc"]["out_of_scope"]), rr["doc"]["out_of_scope"]
+        assert len(rr["decisions"]) == 2 and rr["decisions"][1]["deferred"] and [m["role"] for m in rr["thread"]] == ["owner", "assistant"], rr["thread"]
+        assert "No open questions remain" in rr["thread"][-1]["text"]
+        rr = await post(f"/api/brdprd/{sid}/accept", {"req_id": "RELA-950"}); assert rr["status"] == "Approved"
+        rr = await post(f"/api/brdprd/{sid}/freeze/RELA-950", {}); assert rr["status"] == "Frozen"
+        await post(f"/api/brdprd/{sid}/answers", {"req_id": "RELA-950", "answers": [{"question": "x", "answer": "y"}]}, 409)
         # --- consistency check
         s = await post(f"/api/brdprd/{sid}/consistency", {})
         assert s["consistency"]["issues"][0]["documents"] == ["RELA-001", "RELA-002"], s["consistency"]
         # --- redefine scope
         await post(f"/api/wizard/modules/consolidate", {"session_id": sid, "instruction": "small"}, 409)
+        await post(f"/api/brdprd/{sid}/accept", {"req_id": "RELA-001"})
         await post(f"/api/brdprd/{sid}/freeze/RELA-001", {})
         s = await post("/api/wizard/reopen-scope", {"session_id": sid, "reason": "too many modules"})
         assert s["stage"] == "freeze" and s["scope_revision"] == 1 and s["consistency"] is None
         arch = s["requirement_archive"][0]
-        assert len(arch["requirements"]) == 9 and any(r["status"] == "Frozen" for r in arch["requirements"]), [r["req_id"] for r in arch["requirements"]]
+        assert len(arch["requirements"]) == 10 and any(r["status"] == "Frozen" for r in arch["requirements"]), [r["req_id"] for r in arch["requirements"]]
         assert (await c.get(f"/api/brdprd/{sid}/requirements")).json() == []
         prop = await post("/api/wizard/modules/consolidate", {"session_id": sid, "instruction": "small project, 2 modules", "target": 2})
         assert prop["modules"][0]["merged_from"] == ["Ingestion Vault", "Genre & Topic Catalogue"] and len(prop["modules"]) == 2, prop

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Archive, ChevronDown, ChevronRight, GitCompare, Lock, LockOpen, Sparkles, Wand2 } from "lucide-react";
+import { Archive, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Clock, GitCompare, Lock, LockOpen, MessagesSquare, Send, Sparkles, Wand2 } from "lucide-react";
 import ReopenScope from "./ReopenScope.jsx";
 import { api } from "../api.js";
 import RequirementDoc, { FlowStrip, LegacyBody } from "./RequirementDoc.jsx";
@@ -8,6 +8,96 @@ function statusClass(status) {
   if (status === "Approved" || status === "Frozen") return "chip good";
   if (status.startsWith("Revised")) return "chip warn";
   return "chip";
+}
+
+function OpenQuestions({ sessionId, req, busy, act }) {
+  const questions = req.doc?.open_questions || [];
+  const key = `gw_answers_${sessionId}_${req.req_id}`;
+  const [ans, setAnsState] = useState(() => { try { return JSON.parse(localStorage.getItem(key) || "{}"); } catch { return {}; } });
+  const setAns = (q, patch) => setAnsState((a) => {
+    const n = { ...a, [q]: { answer: "", defer: false, ...a[q], ...patch } };
+    try { localStorage.setItem(key, JSON.stringify(n)); } catch { /* storage unavailable */ }
+    return n;
+  });
+  const ready = questions.filter((q) => ans[q]?.defer || ans[q]?.answer?.trim());
+  const submit = async () => {
+    const payload = ready.map((q) => ({ question: q, answer: (ans[q]?.answer || "").trim(), defer: !!ans[q]?.defer }));
+    if (await act("Updating the document with your answers…", () => api.answerQuestions(sessionId, req.req_id, payload))) {
+      try { localStorage.removeItem(key); } catch { /* ignore */ }
+      setAnsState({});
+    }
+  };
+  return (
+    <section className="oq-panel" aria-label="Open questions">
+      <div className="oq-head">
+        <CircleHelp size={18} aria-hidden="true" />
+        <div>
+          <strong>{questions.length} open question{questions.length === 1 ? "" : "s"} need{questions.length === 1 ? "s" : ""} the product owner's answer</strong>
+          <p>Answer each one, or choose <b>Decide later</b> to record it as deferred. The document is updated with your answers; it can be approved once nothing is open.</p>
+        </div>
+      </div>
+      <ol className="oq-list">
+        {questions.map((q, i) => {
+          const a = ans[q] || {};
+          return (
+            <li key={q} className={a.defer ? "deferred" : a.answer?.trim() ? "answered" : ""}>
+              <p className="oq-q"><b>Q{i + 1}.</b> {q}</p>
+              <textarea rows={2} value={a.answer || ""} disabled={!!busy} aria-label={`Answer to question ${i + 1}`}
+                placeholder={a.defer ? "Why it can wait (optional) — e.g. decide after the pilot" : "Your answer…"}
+                onChange={(e) => setAns(q, { answer: e.target.value })} />
+              <label className="oq-defer">
+                <input type="checkbox" checked={!!a.defer} disabled={!!busy} onChange={(e) => setAns(q, { defer: e.target.checked })} />
+                <Clock size={13} aria-hidden="true" /> Decide later (record as deferred)
+              </label>
+            </li>
+          );
+        })}
+      </ol>
+      <div className="requirement-actions">
+        <span className="muted small" style={{ flex: 1 }}>{ready.length} of {questions.length} ready{ready.length < questions.length && ready.length > 0 ? " — you can submit these now and answer the rest after" : ""}</span>
+        <button className="btn-primary" disabled={!!busy || ready.length === 0} onClick={submit}><Send size={14} /> {busy?.startsWith("Updating") ? "Updating…" : `Submit ${ready.length || ""} answer${ready.length === 1 ? "" : "s"}`}</button>
+      </div>
+    </section>
+  );
+}
+
+function ReviewThread({ req }) {
+  const [open, setOpen] = useState(false);
+  const thread = req.thread || [];
+  const decisions = req.decisions || [];
+  if (!thread.length && !decisions.length) return null;
+  return (
+    <section className="review-thread">
+      <button type="button" className="link-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />} <MessagesSquare size={14} aria-hidden="true" /> Review conversation &amp; decisions ({decisions.length} decision{decisions.length === 1 ? "" : "s"})
+      </button>
+      {open && (
+        <>
+          {decisions.length > 0 && (
+            <ul className="decision-log">
+              {decisions.map((d, i) => (
+                <li key={i}>
+                  {d.deferred ? <Clock size={14} aria-hidden="true" /> : <CheckCircle2 size={14} aria-hidden="true" />}
+                  <div><b>{d.question}</b><span>{d.deferred ? `Deferred${d.answer ? ` — ${d.answer}` : ""}` : d.answer}</span></div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="chat-log static thread-log">
+            {thread.map((m, i) => (
+              <div key={i} className={"msg " + (m.role === "owner" ? "user" : "bot")}>
+                {m.role === "owner" ? <span className="msg-avatar user" aria-hidden="true">YOU</span> : <span className="msg-avatar bot" aria-hidden="true"><Sparkles size={16} /></span>}
+                <div className="msg-body">
+                  <span className="msg-author">{m.role === "owner" ? "Product owner" : "GiveWings AI"}</span>
+                  <div className="msg-bubble">{m.text}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 function RequirementCard({ sessionId, req, onChange, open, onToggle }) {
@@ -22,6 +112,8 @@ function RequirementCard({ sessionId, req, onChange, open, onToggle }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState(null);
   const pending = !!(req.revised_doc || req.revised_body);
+  const questions = req.doc?.open_questions || [];
+  const needsAnswers = questions.length > 0 && !pending && req.status !== "Frozen";
 
   async function act(label, fn) {
     setBusy(label);
@@ -63,7 +155,7 @@ function RequirementCard({ sessionId, req, onChange, open, onToggle }) {
 
       {open && (
         <div className="doc-body">
-          {req.doc ? <RequirementDoc doc={req.doc} /> : (
+          {req.doc ? <RequirementDoc doc={req.doc} hideQuestions={needsAnswers} /> : (
             <>
               <div className="callout">
                 <Wand2 size={20} aria-hidden="true" />
@@ -86,6 +178,13 @@ function RequirementCard({ sessionId, req, onChange, open, onToggle }) {
               </div>
             </div>
           )}
+
+          {needsAnswers && <OpenQuestions sessionId={sessionId} req={req} busy={busy} act={act} />}
+          {busy && busy.startsWith("Updating") && (
+            <div className="working inline" role="status"><span className="spinner sm" aria-hidden="true" /><span>GiveWings AI is writing your answers into the document…</span></div>
+          )}
+
+          <ReviewThread req={req} />
 
           {!pending && req.status !== "Frozen" && (
             <div className="comment-row">
@@ -116,8 +215,9 @@ function RequirementCard({ sessionId, req, onChange, open, onToggle }) {
                 ) : (
                   <>
                     {!req.doc && <button className="btn-secondary" disabled={!!busy} onClick={() => act("Restructuring…", () => api.restructure(sessionId, req.req_id))}><Wand2 size={15} /> Restructure</button>}
-                    {req.status === "Draft" && <button className="btn-primary" disabled={!!busy} onClick={() => act("Approving…", () => api.accept(sessionId, req.req_id))}>Approve as is</button>}
-                    {req.status === "Approved" && req.doc && <button className="btn-primary" disabled={!!busy} onClick={() => act("Freezing…", () => api.freezeRequirement(sessionId, req.req_id))}><Lock size={14} /> Freeze</button>}
+                    {questions.length > 0 && <span className="muted small comment-hint">Answer or defer the {questions.length} open question{questions.length === 1 ? "" : "s"} above to approve this document.</span>}
+                    {questions.length === 0 && req.status === "Draft" && <button className="btn-primary" disabled={!!busy} onClick={() => act("Approving…", () => api.accept(sessionId, req.req_id))}>Approve</button>}
+                    {questions.length === 0 && req.status === "Approved" && req.doc && <button className="btn-primary" disabled={!!busy} onClick={() => act("Freezing…", () => api.freezeRequirement(sessionId, req.req_id))}><Lock size={14} /> Freeze</button>}
                     {req.status === "Approved" && !req.doc && <span className="muted small">Restructure before freezing</span>}
                   </>
                 )}
