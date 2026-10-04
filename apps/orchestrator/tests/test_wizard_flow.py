@@ -33,6 +33,28 @@ async def fake(feature, prompt, system=None):
         return {"text": json.dumps({"modules": [{"name": "genre & topic catalogue", "starts_when": "Items are in the vault", "outcome": "Items are filed by topic"}, {"name": "Repurpose Studio", "starts_when": "A topic is chosen", "outcome": "Drafts exist"}]})}
     if f == ai_router.Feature.MODULE_BREAKDOWN:
         return {"text": '{"modules":[{"name":"Ingestion Vault","description":"captures forwards","platform_core":false},{"name":"Catalogue","description":"genre/topic","platform_core":false},{"name":"Auth & Identity","description":"login","platform_core":true}]}'}
+    if f == ai_router.Feature.TECH_DESIGN_GENERATION and "Suggest a Technical Stack Charter" in prompt:
+        return {"text": json.dumps({"product_type": "SaaS web app", "frontend": "React + Vite", "backend": "Python FastAPI, REST",
+            "data": "PostgreSQL", "ai_ml": "LLM via gateway", "hosting": "TBD — confirm: AWS Mumbai or Phoneme DC",
+            "integrations": "WhatsApp Business API, email inbound", "devops": "GitHub Actions", "security": "DPDP Act 2023; data in India",
+            "conventions": "ruff, eslint"})}
+    if f == ai_router.Feature.TECH_DESIGN_GENERATION and "High-Level Design" in prompt:
+        assert "PostgreSQL" in prompt, "stack charter missing from HLD prompt"
+        return {"text": json.dumps({"overview": "SPA + API + workers.", "components": [{"name": "API", "responsibility": "serves the SPA"}],
+            "integrations": ["WhatsApp Business API"], "security": ["JWT sessions"], "nfr": [{"requirement": "2s screens", "approach": "caching"}],
+            "sequence": ["1. User forwards", "2. API stores"], "risks": ["WhatsApp approval -> apply early"],
+            "open_questions": [] if "answered open questions" in prompt else ["Which region hosts production?"]})}
+    if f == ai_router.Feature.TECH_DESIGN_GENERATION and "Low-Level Design" in prompt:
+        return {"text": json.dumps({"overview": "Module design.", "components": [{"name": "Svc", "responsibility": "x"}],
+            "data_model": [{"name": "Item", "description": "a captured item", "fields": [{"name": "id", "type": "uuid", "notes": "pk"}]}],
+            "apis": [{"method": "post", "path": "/api/items", "purpose": "create", "request": "url", "response": "item"}],
+            "sequence": ["Client calls API", "API saves"], "edge_cases": ["duplicate -> merge"], "security": ["owner-only access"],
+            "nfr": [{"requirement": "fast", "approach": "index"}], "open_questions": []})}
+    if f == ai_router.Feature.TECH_DESIGN_GENERATION and "Design the screens" in prompt:
+        return {"text": json.dumps({"screens": [{"name": "Vault inbox", "purpose": "See captured items", "route": "/inbox", "layout": "app",
+            "blocks": [{"type": "stats", "items": ["Items this week: 42"]}, {"type": "list", "title": "Latest", "items": ["AI chips article — Article"]},
+                       {"type": "bogus", "text": "falls back to text"}], "states": ["empty: connect WhatsApp"]}],
+            "notes": ["Inbox first"], "open_questions": []})}
     if f == ai_router.Feature.TECH_DESIGN_GENERATION:
         flow_prompts.append(prompt)
         if "too technical" in prompt:
@@ -241,5 +263,79 @@ async def run():
         reqs = (await c.get(f"/api/brdprd/{sid}/requirements")).json()
         print("after redefine:", s["generation"]["status"], [(r["req_id"], r["module"]) for r in reqs])
         assert s["stage"] == "manager" and len(reqs) == 6
+        # --- baseline + export
+        await post(f"/api/brdprd/{sid}/baseline", {}, 409)          # not all frozen yet
+        for r in reqs:
+            await post(f"/api/brdprd/{sid}/accept", {"req_id": r["req_id"]})
+            await post(f"/api/brdprd/{sid}/freeze/{r['req_id']}", {})
+        st = (await c.get(f"/api/brdprd/{sid}/baseline")).json()
+        assert st["all_frozen"] and st["version"] is None and st["next_version"] == "1.0", st
+        s = await post(f"/api/brdprd/{sid}/baseline", {})
+        assert s["stage"] == "techdesign" and s["baselines"][0]["version"] == "1.0", s["baselines"]
+        s = await post(f"/api/brdprd/{sid}/baseline", {}); assert len(s["baselines"]) == 1   # nothing changed
+        # change one document -> v1.1
+        await post(f"/api/brdprd/{sid}/unfreeze/RELA-002", {})
+        r2 = await store.get_requirement(sid, "RELA-002"); r2.doc.business_rules.append("Duplicates are merged."); await store.add_requirement(sid, r2)
+        await post(f"/api/brdprd/{sid}/accept", {"req_id": "RELA-002"})
+        await post(f"/api/brdprd/{sid}/freeze/RELA-002", {})
+        st = (await c.get(f"/api/brdprd/{sid}/baseline")).json()
+        assert st["changed_since"] == ["RELA-002"] and st["next_version"] == "1.1", st
+        s = await post(f"/api/brdprd/{sid}/baseline", {})
+        assert s["baselines"][-1]["version"] == "1.1" and "RELA-002" in s["baselines"][-1]["description"]
+        x = await c.get(f"/api/brdprd/{sid}/export/brdprd.docx")
+        assert x.status_code == 200 and x.content[:2] == b"PK" and "PHN-RELA-" in x.headers["content-disposition"], x.headers
+        open("/tmp/brdprd_test.docx", "wb").write(x.content)
+        print("export bytes:", len(x.content), x.headers["content-disposition"])
+        # ================= Stage 8: Technical Design =================
+        await post(f"/api/techdesign/{sid}/generate", {}, 409)                 # stack not confirmed
+        s = await post(f"/api/techdesign/{sid}/stack/suggest", {})
+        assert s["stack"]["backend"] == "Python FastAPI, REST" and not s["stack"]["confirmed"]
+        await post(f"/api/techdesign/{sid}/stack/confirm", {}, 400)            # TBD left
+        stk = dict(s["stack"]); stk["hosting"] = "AWS Mumbai (ap-south-1)"
+        s = await post(f"/api/techdesign/{sid}/stack", {"stack": stk})
+        s = await post(f"/api/techdesign/{sid}/stack/confirm", {}); assert s["stack"]["confirmed"]
+        s = await post(f"/api/techdesign/{sid}/generate", {})
+        for _ in range(60):
+            await asyncio.sleep(0.1)
+            s = (await c.get(f"/api/discovery/{sid}")).json()
+            if s["tech_generation"]["status"] != "running": break
+        tds = s["tech_designs"]
+        assert s["tech_generation"]["status"] == "done" and len(tds) == 7, (s["tech_generation"], len(tds))
+        assert tds[0]["td_id"] == "RELA-TD-000" and tds[0]["kind"] == "hld" and tds[1]["td_id"] == "RELA-TD-001" and tds[1]["req_id"] == "RELA-001"
+        assert tds[2]["doc"]["apis"][0]["method"] == "POST"
+        hid = "RELA-TD-000"
+        await post(f"/api/techdesign/{sid}/accept", {"item_id": hid}, 409)       # open question on HLD
+        s = await post(f"/api/techdesign/{sid}/answers", {"item_id": hid, "answers": [{"question": "Which region hosts production?", "answer": "AWS Mumbai"}]})
+        h = s["tech_designs"][0]; assert h["doc"]["open_questions"] == [] and len(h["decisions"]) == 1
+        s = await post(f"/api/techdesign/{sid}/comment", {"item_id": "RELA-TD-002", "comment": "add rate limits"})
+        assert s["tech_designs"][2]["revised_doc"] and s["tech_designs"][2]["status"].startswith("Revised")
+        await post(f"/api/techdesign/{sid}/freeze/RELA-TD-002", {}, 409)
+        for t in s["tech_designs"]:
+            await post(f"/api/techdesign/{sid}/accept", {"item_id": t["td_id"]})
+            s = await post(f"/api/techdesign/{sid}/freeze/{t['td_id']}", {})
+        s = await post(f"/api/techdesign/{sid}/baseline", {})
+        assert s["stage"] == "uiux" and [b["version"] for b in s["baselines"] if b["doc_type"] == "techdesign"] == ["1.0"]
+        x = await c.get(f"/api/techdesign/{sid}/export/techdesign.docx")
+        assert x.status_code == 200 and x.content[:2] == b"PK" and "PHN-RELA-" in x.headers["content-disposition"]
+        open("/tmp/td_test.docx", "wb").write(x.content)
+        # ================= Stage 9: UI/UX =================
+        s = await post(f"/api/uiux/{sid}/generate", {})
+        for _ in range(60):
+            await asyncio.sleep(0.1)
+            s = (await c.get(f"/api/discovery/{sid}")).json()
+            if s["ui_generation"]["status"] != "running": break
+        uis = s["ui_modules"]
+        assert s["ui_generation"]["status"] == "done" and len(uis) == 6 and uis[0]["ui_id"] == "RELA-UI-001", [u["ui_id"] for u in uis]
+        assert uis[0]["doc"]["screens"][0]["blocks"][2]["type"] == "text"
+        hx = await c.get(f"/api/uiux/{sid}/render/RELA-UI-002")
+        assert hx.status_code == 200 and "Vault inbox" in hx.text and "#0F766E" in hx.text, hx.text[:300]
+        open("/tmp/ui_test.html", "w").write(hx.text)
+        for u in uis:
+            await post(f"/api/uiux/{sid}/accept", {"item_id": u["ui_id"]})
+            s = await post(f"/api/uiux/{sid}/freeze/{u['ui_id']}", {})
+        s = await post(f"/api/uiux/{sid}/baseline", {})
+        assert s["stage"] == "complete", s["stage"]
+        mx = await c.get(f"/api/uiux/{sid}/export/mockups.html")
+        assert mx.status_code == 200 and "PHN-RELA-UIUX_v1.0.html" in mx.headers["content-disposition"]
         print("ALL OK")
 asyncio.run(run())

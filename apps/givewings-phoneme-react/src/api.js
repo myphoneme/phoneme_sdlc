@@ -22,7 +22,30 @@ async function call(path, opts = {}) {
 const post = (path, body) => call(path, { method: "POST", body: JSON.stringify(body) });
 const get = (path) => call(path);
 
+// Generic client for the post-BRD stages (Technical Design, UI/UX) that
+// share one review engine on the server (apps/orchestrator/app/review.py).
+const stageApi = (kind) => ({
+  generate: (sid) => post(`/${kind}/${sid}/generate`, {}),
+  comment: (sid, item_id, comment) => post(`/${kind}/${sid}/comment`, { item_id, comment }),
+  accept: (sid, item_id) => post(`/${kind}/${sid}/accept`, { item_id }),
+  discard: (sid, item_id) => post(`/${kind}/${sid}/discard`, { item_id }),
+  answers: (sid, item_id, answers) => post(`/${kind}/${sid}/answers`, { item_id, answers }),
+  freeze: (sid, item_id) => post(`/${kind}/${sid}/freeze/${item_id}`, {}),
+  unfreeze: (sid, item_id) => post(`/${kind}/${sid}/unfreeze/${item_id}`, {}),
+  baseline: (sid) => get(`/${kind}/${sid}/baseline`),
+  createBaseline: (sid) => post(`/${kind}/${sid}/baseline`, {}),
+});
+
+export const fileUrl = (path) => `${BASE}${path}`;
+
 export const api = {
+  techdesign: stageApi("techdesign"),
+  uiux: stageApi("uiux"),
+  suggestStack: (sid) => post(`/techdesign/${sid}/stack/suggest`, {}),
+  saveStack: (sid, stack) => post(`/techdesign/${sid}/stack`, { stack }),
+  confirmStack: (sid) => post(`/techdesign/${sid}/stack/confirm`, {}),
+  brdBaseline: (sid) => get(`/brdprd/${sid}/baseline`),
+  brdCreateBaseline: (sid) => post(`/brdprd/${sid}/baseline`, {}),
   listSessions: () => get("/discovery"),
   startSession: (initial_message) => post("/discovery/start", { initial_message }),
   getSession: (session_id) => get(`/discovery/${session_id}`),

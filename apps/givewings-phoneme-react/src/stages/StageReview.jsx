@@ -5,6 +5,9 @@ import { ResearchReportView } from "./ResearchCard.jsx";
 import { IdentitySummary } from "./IdentityStudio.jsx";
 import { GenerationBoard } from "./Generating.jsx";
 import ReopenScope from "./ReopenScope.jsx";
+import BrdPrdManager from "./BrdPrdManager.jsx";
+import TechDesignStage from "./TechDesignStage.jsx";
+import UIUXStage from "./UIUXStage.jsx";
 
 const BRIEF_FIELDS = [
   ["target_users", "Target users"], ["core_workflow", "Core workflow"], ["input_channels", "Input channels"],
@@ -147,7 +150,11 @@ function GenerationReview({ session, requirements }) {
   );
 }
 
-export default function StageReview({ stage, session, setSession, requirements }) {
+export default function StageReview({ stage, session, setSession, requirements, setRequirements }) {
+  // Document stages stay live after their baseline: unfreeze -> change -> re-baseline.
+  if (stage === "manager") return <BrdPrdManager session={session} setSession={setSession} requirements={requirements} setRequirements={setRequirements} />;
+  if (stage === "techdesign") return <TechDesignStage session={session} setSession={setSession} />;
+  if (stage === "uiux") return <UIUXStage session={session} setSession={setSession} />;
   if (stage === "discovery") return <DiscoveryReview session={session} />;
   if (stage === "research") return session.research ? <ResearchReportView research={session.research} /> : <Empty>No research recorded.</Empty>;
   if (stage === "identity") return <IdentityReview session={session} />;

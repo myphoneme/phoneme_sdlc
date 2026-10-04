@@ -8,16 +8,49 @@ sees it next to the current version and accepts or discards it.
 """
 import json
 
+import hashlib
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 
 from datetime import datetime, timezone
 
 from .. import ai_router, reqdoc, store
 from ..locks import session_lock
 from ..models import (
-    AcceptRequest, AnswersRequest, CommentRequest, ConsistencyIssue, ConsistencyReport,
+    AcceptRequest, AnswersRequest, Baseline, CommentRequest, ConsistencyIssue, ConsistencyReport,
     Decision, Requirement, ReviewMessage, SessionState,
 )
+from .. import export as exporter
+
+
+def _hash(r: Requirement) -> str:
+    raw = json.dumps({"t": r.title, "d": r.doc.model_dump() if r.doc else r.body}, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(raw.encode()).hexdigest()[:12]
+
+
+def next_version(state: SessionState, doc_type: str) -> str:
+    prev = [b for b in state.baselines if b.doc_type == doc_type]
+    if not prev:
+        return "1.0"
+    major, minor = prev[-1].version.split(".")
+    return f"{major}.{int(minor) + 1}"
+
+
+def baseline_status(state: SessionState, reqs: list[Requirement]) -> dict:
+    """Is the frozen set baselined, and has anything changed since?"""
+    prev = [b for b in state.baselines if b.doc_type == "brdprd"]
+    last = prev[-1] if prev else None
+    current = {r.req_id: _hash(r) for r in reqs}
+    changed = [] if not last else sorted(
+        k for k in set(current) | set(last.snapshot) if current.get(k) != last.snapshot.get(k)
+    )
+    return {
+        "all_frozen": bool(reqs) and all(r.status == "Frozen" for r in reqs),
+        "version": last.version if last else None,
+        "changed_since": changed,
+        "next_version": next_version(state, "brdprd"),
+    }
 
 
 def _now() -> str:
@@ -299,3 +332,57 @@ async def check_consistency(session_id: str):
         )
         await store.save_session(state)
         return state
+
+
+@router.get("/{session_id}/baseline")
+async def get_baseline(session_id: str):
+    state = await store.get_session(session_id)
+    if not state:
+        raise HTTPException(404, "session not found")
+    return baseline_status(state, await store.list_requirements(session_id))
+
+
+@router.post("/{session_id}/baseline", response_model=SessionState)
+async def create_baseline(session_id: str):
+    """Stamp the frozen BRD/PRD as a version (v1.0, then v1.1 ... after
+    changes) and open the next SDLC stage, Technical Design."""
+    async with session_lock(session_id, "baseline"):
+        state = await store.get_session(session_id)
+        if not state:
+            raise HTTPException(404, "session not found")
+        reqs = sorted(await store.list_requirements(session_id), key=lambda r: r.req_id)
+        st = baseline_status(state, reqs)
+        if not st["all_frozen"]:
+            raise HTTPException(409, "freeze every document before baselining the BRD/PRD")
+        if st["version"] and not st["changed_since"]:
+            return state  # nothing new to baseline
+        version = st["next_version"]
+        if st["version"]:
+            desc = "Revised after re-review: " + ", ".join(st["changed_since"])
+        else:
+            n_dec = sum(len(r.decisions) for r in reqs)
+            desc = f"Initial baseline — {len(reqs)} documents frozen" + (f", {n_dec} product-owner decisions recorded" if n_dec else "")
+        state.baselines.append(Baseline(
+            doc_type="brdprd", version=version, at=_now(), description=desc,
+            snapshot={r.req_id: _hash(r) for r in reqs},
+        ))
+        if state.stage in ("manager", "generating"):
+            state.stage = "techdesign"
+        await store.save_session(state)
+        return state
+
+
+@router.get("/{session_id}/export/brdprd.docx")
+async def export_brdprd(session_id: str):
+    state = await store.get_session(session_id)
+    if not state:
+        raise HTTPException(404, "session not found")
+    reqs = sorted(await store.list_requirements(session_id), key=lambda r: r.req_id)
+    if not reqs:
+        raise HTTPException(400, "no requirements to export")
+    data, filename = exporter.brdprd_docx(state, reqs)
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

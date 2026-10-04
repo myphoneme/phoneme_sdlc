@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Eye } from 'lucide-react';
+import { Network, LayoutTemplate, PackageCheck } from 'lucide-react';
 import { ArrowRight, ArrowUpRight, Bell, Check, ChevronDown, ChevronRight, CircleHelp, Command, FileText, Layers3, Lightbulb, Menu, MessageCircle, MoreHorizontal, Plus, Rocket, Search, Sparkles, UsersRound, WandSparkles, X, Zap, BarChart3, ClipboardCheck, Target, PenLine } from 'lucide-react';
 import DiscoveryChat from './stages/DiscoveryChat.jsx';
 import ResearchCard from './stages/ResearchCard.jsx';
@@ -10,14 +11,17 @@ import StageReview from './stages/StageReview.jsx';
 import Generating from './stages/Generating.jsx';
 import ModuleFlowReview from './stages/ModuleFlowReview.jsx';
 import BrdPrdManager from './stages/BrdPrdManager.jsx';
+import TechDesignStage from './stages/TechDesignStage.jsx';
+import UIUXStage from './stages/UIUXStage.jsx';
+import HandoverPack from './stages/HandoverPack.jsx';
 import { api } from './api.js';
 
 // The real backend's 7-stage wizard (apps/orchestrator/app/models.py
 // SessionState.stage) -- NOT the mockup's invented 4-stage
 // ['Idea','Plan','Build','Launch'] taxonomy. Every place that used to render
 // 4 stages now adapts to these 7.
-const STAGES = ['discovery', 'research', 'identity', 'freeze', 'flow', 'generating', 'manager'];
-const STAGE_LABELS = ['Discovery Chat', 'Research', 'Identity', 'Freeze Scope', 'Flow Design', 'Drafting BRD/PRD', 'BRD/PRD Manager'];
+const STAGES = ['discovery', 'research', 'identity', 'freeze', 'flow', 'generating', 'manager', 'techdesign', 'uiux', 'complete'];
+const STAGE_LABELS = ['Discovery Chat', 'Research', 'Identity', 'Freeze Scope', 'Flow Design', 'Drafting BRD/PRD', 'BRD/PRD Manager', 'Technical Design', 'UI/UX Design', 'Ready to Build'];
 // 'confirm' (reviewing the concept brief) is the tail of Discovery on the journey.
 const journeyStage = stage => (stage === 'confirm' ? 'discovery' : stage);
 
@@ -46,7 +50,10 @@ const STAGE_META = {
   freeze: { icon: Target, title: 'Freeze Scope', short: 'Agree the module list', desc: 'GiveWings AI breaks the product into modules. Rename, describe, add, remove or reorder them — flows are designed only for the modules you freeze here.' },
   flow: { icon: Layers3, title: 'Flow Design', short: 'How each module works', desc: 'Pin down the step-by-step sequence for every module. Edit, reorder, add or remove steps yourself, or comment and let AI rework it — then approve.' },
   generating: { icon: Sparkles, title: 'Drafting BRD/PRD', short: 'AI writes requirements', desc: 'GiveWings AI drafts one requirement document per frozen module. Progress updates live — you can leave and come back.' },
-  manager: { icon: FileText, title: 'BRD/PRD Manager', short: 'Review, revise, freeze', desc: 'Review each drafted requirement. Comment to request a revision, accept or discard it, and freeze once approved.' },
+  manager: { icon: FileText, title: 'BRD/PRD Manager', short: 'Review, revise, freeze', desc: 'Review each drafted requirement. Answer open questions, comment to request a revision, approve and freeze — then baseline the BRD/PRD to move on.' },
+  techdesign: { icon: Network, title: 'Technical Design', short: 'Stack, HLD & LLD', desc: 'Confirm the technology stack, then review the architecture (HLD) and a low-level design per module — data model, APIs and sequences — traced 1:1 to the BRD/PRD.' },
+  uiux: { icon: LayoutTemplate, title: 'UI/UX Design', short: 'Screens in your brand', desc: 'Every screen for every module, drawn in the identity you chose. Comment to rework, answer open questions, approve and freeze.' },
+  complete: { icon: PackageCheck, title: 'Ready to Build', short: 'Handover pack', desc: 'All documents are baselined. Download the handover pack for the build team.' },
 };
 
 function IconBox({ icon: Icon, tone = 'orange' }) { return <span className={`icon-box ${tone}`}><Icon size={22} strokeWidth={2} /></span>; }
@@ -119,6 +126,8 @@ function timeAgo(iso) {
 function statusFor(rawStage) {
   const stage = journeyStage(rawStage);
   if (stage === 'discovery') return { label: 'Early stage', cls: 'early-stage' };
+  if (stage === 'complete') return { label: 'Ready to build', cls: '' };
+  if (stage === 'techdesign' || stage === 'uiux') return { label: 'In design', cls: 'in-progress' };
   if (stage === 'generating' || stage === 'manager') return { label: 'Ready for BRD/PRD', cls: '' };
   return { label: 'In progress', cls: 'in-progress' };
 }
@@ -340,7 +349,8 @@ function JourneyRail({ stageIndex, viewIndex, onView }) {
       <ol className="journey-steps">
         {STAGES.map((s, i) => {
           const meta = STAGE_META[s];
-          const state = i < stageIndex ? 'done' : i === stageIndex ? 'current' : 'todo';
+          // 'complete' is the end of the journey, not a step in progress.
+          const state = i < stageIndex || (s === 'complete' && i === stageIndex) ? 'done' : i === stageIndex ? 'current' : 'todo';
           const reachable = i <= stageIndex;
           const viewing = i === viewIndex;
           const inner = (
@@ -425,7 +435,7 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
           {reviewing && (
             <div className="review-banner" role="status">
               <Eye size={16} aria-hidden="true" />
-              <span>You are looking back at a completed step — read-only.</span>
+              <span>{['manager', 'techdesign', 'uiux'].includes(viewStage) ? 'You are looking back at a baselined stage — unfreeze a document to change it, then re-baseline.' : 'You are looking back at a completed step — read-only.'}</span>
               <button type="button" className="btn-primary" onClick={() => setViewIndex(stageIndex)}>
                 Back to {STAGE_META[jStage].title} <ArrowRight size={15} />
               </button>
@@ -441,7 +451,7 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
           </header>
           <div className="stage-panel-body">
             {reviewing ? (
-              <StageReview stage={viewStage} session={session} setSession={setSession} requirements={requirements} />
+              <StageReview stage={viewStage} session={session} setSession={setSession} requirements={requirements} setRequirements={setRequirements} />
             ) : (
               <>
                 {stage === 'discovery' && <DiscoveryChat session={session} setSession={setSession} />}
@@ -456,6 +466,9 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
                 {stage === 'manager' && (
                   <BrdPrdManager session={session} setSession={setSession} requirements={requirements} setRequirements={setRequirements} />
                 )}
+                {stage === 'techdesign' && <TechDesignStage session={session} setSession={setSession} />}
+                {stage === 'uiux' && <UIUXStage session={session} setSession={setSession} />}
+                {stage === 'complete' && <HandoverPack session={session} />}
               </>
             )}
           </div>

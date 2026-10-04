@@ -171,6 +171,16 @@ class SessionState(BaseModel):
     requirement_archive: list["ArchivedRequirementSet"] = []
     consistency: Optional["ConsistencyReport"] = None
     scope_revision: int = 0
+    # 2026-10-04: frozen-set baselines (BRD/PRD v1.0, v1.1 ...) -- each
+    # one is a Change Log row in the exported document.
+    baselines: list["Baseline"] = []
+    # Stage 8 -- Technical Design (stack charter, HLD + per-module LLD)
+    stack: Optional["StackCharter"] = None
+    tech_designs: list["TechDesign"] = []
+    tech_generation: GenerationProgress = GenerationProgress()
+    # Stage 9 -- UI/UX screens in the product's brand
+    ui_modules: list["UIModule"] = []
+    ui_generation: GenerationProgress = GenerationProgress()
     # discovery -> confirm -> research -> identity -> freeze -> flow -> generating -> manager
     stage: str = "discovery"
 
@@ -383,5 +393,152 @@ class ReopenScopeRequest(BaseModel):
     reason: str = ""
 
 
+class StackCharter(BaseModel):
+    """Phoneme Technical Stack Charter -- confirmed once per product and
+    referenced by every later document instead of being re-decided."""
+    product_type: str = ""
+    frontend: str = ""
+    backend: str = ""
+    data: str = ""
+    ai_ml: str = ""
+    hosting: str = ""
+    integrations: str = ""
+    devops: str = ""
+    security: str = ""
+    conventions: str = ""
+    confirmed: bool = False
+    confirmed_at: str = ""
+    changelog: list[str] = []
+
+
+class TDComponent(BaseModel):
+    name: str
+    responsibility: str = ""
+
+
+class TDField(BaseModel):
+    name: str
+    type: str = ""
+    notes: str = ""
+
+
+class TDEntity(BaseModel):
+    name: str
+    description: str = ""
+    fields: list[TDField] = []
+
+
+class TDApi(BaseModel):
+    method: str = "GET"
+    path: str
+    purpose: str = ""
+    request: str = ""
+    response: str = ""
+
+
+class TDNfr(BaseModel):
+    requirement: str
+    approach: str = ""
+
+
+class TechDoc(BaseModel):
+    """One Technical Design section: the HLD (system architecture) or one
+    module's LLD -- same shape so both share the review loop."""
+    overview: str = ""
+    components: list[TDComponent] = []
+    data_model: list[TDEntity] = []
+    apis: list[TDApi] = []
+    sequence: list[str] = []
+    edge_cases: list[str] = []
+    integrations: list[str] = []
+    security: list[str] = []
+    nfr: list[TDNfr] = []
+    risks: list[str] = []
+    open_questions: list[str] = []
+
+
+class TechDesign(BaseModel):
+    td_id: str
+    module: str  # "System architecture (HLD)" for the HLD
+    req_id: str = ""  # traceability back to the BRD/PRD
+    title: str = ""
+    kind: str = "lld"  # hld | lld
+    status: str = "Draft"
+    doc: Optional[TechDoc] = None
+    revised_doc: Optional[TechDoc] = None
+    status_before_revision: Optional[str] = None
+    thread: list[ReviewMessage] = []
+    decisions: list[Decision] = []
+
+
+class UIBlock(BaseModel):
+    type: str = "text"  # header|text|list|cards|form|buttons|table|tabs|stats|notice|steps|media
+    title: str = ""
+    text: str = ""
+    items: list[str] = []
+    columns: list[str] = []
+    rows: list[list[str]] = []
+    actions: list[str] = []
+
+
+class UIScreen(BaseModel):
+    screen_id: str = ""
+    name: str
+    purpose: str = ""
+    route: str = ""
+    layout: str = "app"  # app | public | mobile
+    blocks: list[UIBlock] = []
+    states: list[str] = []
+
+
+class UIDoc(BaseModel):
+    screens: list[UIScreen] = []
+    notes: list[str] = []  # design decisions / deferred items
+    open_questions: list[str] = []
+
+
+class UIModule(BaseModel):
+    ui_id: str
+    module: str
+    req_id: str = ""
+    title: str = ""
+    kind: str = "screens"
+    status: str = "Draft"
+    doc: Optional[UIDoc] = None
+    revised_doc: Optional[UIDoc] = None
+    status_before_revision: Optional[str] = None
+    thread: list[ReviewMessage] = []
+    decisions: list[Decision] = []
+
+
+class ItemCommentRequest(BaseModel):
+    item_id: str
+    comment: str
+
+
+class ItemRequest(BaseModel):
+    item_id: str
+
+
+class ItemAnswersRequest(BaseModel):
+    item_id: str
+    answers: list[AnswerItem]
+
+
+class StackSaveRequest(BaseModel):
+    stack: StackCharter
+
+
+class Baseline(BaseModel):
+    """A frozen, versioned set of documents for one SDLC stage."""
+    doc_type: str = "brdprd"  # brdprd | techdesign | uiux
+    version: str
+    at: str
+    description: str = ""
+    snapshot: dict[str, str] = {}  # doc id -> content hash
+
+
+
 SessionState.model_rebuild()
 ArchivedRequirementSet.model_rebuild()
+

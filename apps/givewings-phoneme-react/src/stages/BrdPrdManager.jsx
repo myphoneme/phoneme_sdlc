@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Archive, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Clock, GitCompare, Lock, LockOpen, MessagesSquare, Send, Sparkles, Wand2 } from "lucide-react";
 import ReopenScope from "./ReopenScope.jsx";
-import { api } from "../api.js";
+import { api, fileUrl } from "../api.js";
+import { BaselinePanel } from "./ReviewKit.jsx";
 import RequirementDoc, { FlowStrip, LegacyBody } from "./RequirementDoc.jsx";
 
 function statusClass(status) {
@@ -310,6 +311,11 @@ export default function BrdPrdManager({ session, setSession, requirements, setRe
 
   return (
     <div className="review">
+      {total > 0 && (
+        <BaselinePanel label="BRD/PRD" nextLabel="Technical Design" refreshKey={requirements.map((r) => r.status + (r.doc?.business_rules?.length || 0)).join()}
+          fetchStatus={() => api.brdBaseline(session.session_id)} onBaseline={async () => setSession(await api.brdCreateBaseline(session.session_id))}
+          downloads={[{ label: "BRD/PRD (.docx)", href: fileUrl(`/brdprd/${session.session_id}/export/brdprd.docx`) }]} />
+      )}
       {total > 0 ? (
         <div className="gen-board">
           <div className="gen-stats">
