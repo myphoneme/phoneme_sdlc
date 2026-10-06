@@ -479,6 +479,7 @@ class UIBlock(BaseModel):
     columns: list[str] = []
     rows: list[list[str]] = []
     actions: list[str] = []
+    targets: list[str] = []  # screen each action leads to (parallel to actions)
 
 
 class UIScreen(BaseModel):
@@ -486,9 +487,11 @@ class UIScreen(BaseModel):
     name: str
     purpose: str = ""
     route: str = ""
-    layout: str = "app"  # app | public | mobile
+    layout: str = "app"  # app | public | mobile | image (uploaded design)
     blocks: list[UIBlock] = []
     states: list[str] = []
+    source: str = "ai"  # ai | upload
+    asset_id: str = ""  # uploaded file id when source == upload
 
 
 class UIDoc(BaseModel):
@@ -523,6 +526,19 @@ class ItemRequest(BaseModel):
 class ItemAnswersRequest(BaseModel):
     item_id: str
     answers: list[AnswerItem]
+
+
+class ScreenEditRequest(BaseModel):
+    item_id: str
+    screen_id: str
+    name: Optional[str] = None
+    purpose: Optional[str] = None
+
+
+class ScreenMoveRequest(BaseModel):
+    item_id: str
+    screen_id: str
+    direction: int = 1  # -1 up, +1 down
 
 
 class StackSaveRequest(BaseModel):

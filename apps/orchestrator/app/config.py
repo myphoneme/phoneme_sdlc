@@ -51,3 +51,10 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./phoneme_sdlc.db")
 
 # --- CORS (React-Vite dev server / staging frontend origin) ---
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+
+
+# Uploaded UI/UX design files (2026-10-06). One folder per session; kept out
+# of the session JSON so the database envelope stays small.
+from pathlib import Path as _Path
+UPLOAD_DIR = _Path(os.environ.get("UPLOAD_DIR", str(_Path(__file__).resolve().parent.parent / "uploads")))
+UPLOAD_MAX_BYTES = int(os.environ.get("UPLOAD_MAX_BYTES", str(10 * 1024 * 1024)))

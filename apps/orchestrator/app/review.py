@@ -56,6 +56,7 @@ class Kind:
     draft: Callable[[SessionState, Any, Optional[str]], Awaitable[Any]]  # -> doc
     record_deferred: Callable[[Any, str], None]                  # doc, text
     ready: Callable[[SessionState], Optional[str]] = lambda s: None  # error if not ready
+    merge: Callable[[Any, Any], Any] = lambda old, new: new  # keep user content (e.g. uploads) when a draft lands
 
 
 def items(kind: Kind, state: SessionState) -> list:
@@ -127,7 +128,7 @@ async def _run(kind: Kind, session_id: str) -> None:
             g = getattr(state, kind.gen_attr)
             gi = next(x for x in g.items if x.req_id == gi.req_id)
             item = find(kind, state, gi.req_id)
-            item.doc = doc
+            item.doc = kind.merge(item.doc, doc)
             item.status = "Draft"
             gi.status = "done"
             g.done = sum(1 for x in g.items if x.status == "done")

@@ -330,6 +330,36 @@ async def run():
         hx = await c.get(f"/api/uiux/{sid}/render/RELA-UI-002")
         assert hx.status_code == 200 and "Vault inbox" in hx.text and "#0F766E" in hx.text, hx.text[:300]
         open("/tmp/ui_test.html", "w").write(hx.text)
+        # --- clickable prototype + uploaded designs
+        import os, tempfile
+        from app import config as _cfg
+        _cfg.UPLOAD_DIR = __import__("pathlib").Path(tempfile.mkdtemp())
+        PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+        up = await c.post(f"/api/uiux/{sid}/upload/RELA-UI-002", files=[("files", ("vault_setup_screen.png", PNG, "image/png"))], data={"mode": "add"})
+        assert up.status_code == 200, up.text
+        m2 = next(u for u in up.json()["ui_modules"] if u["ui_id"] == "RELA-UI-002")
+        shots = m2["doc"]["screens"]; assert [x["source"] for x in shots] == ["ai", "upload"] and shots[1]["name"] == "vault setup screen", shots
+        fid = shots[1]["asset_id"]
+        f = await c.get(f"/api/uiux/{sid}/file/{fid}"); assert f.status_code == 200 and f.headers["content-type"] == "image/png" and f.headers["x-content-type-options"] == "nosniff"
+        bad = await c.post(f"/api/uiux/{sid}/upload/RELA-UI-002", files=[("files", ("x.svg", b"<svg onload=alert(1)>", "image/svg+xml"))]); assert bad.status_code == 415, bad.text
+        s = await post(f"/api/uiux/{sid}/screens/move", {"item_id": "RELA-UI-002", "screen_id": shots[1]["screen_id"], "direction": -1})
+        m2 = next(u for u in s["ui_modules"] if u["ui_id"] == "RELA-UI-002"); assert m2["doc"]["screens"][0]["source"] == "upload"
+        s = await post(f"/api/uiux/{sid}/screens/update", {"item_id": "RELA-UI-002", "screen_id": shots[1]["screen_id"], "name": "Vault setup"})
+        # rework with AI keeps the upload
+        s = await post(f"/api/uiux/{sid}/comment", {"item_id": "RELA-UI-002", "comment": "add an empty state"})
+        await post(f"/api/uiux/{sid}/accept", {"item_id": "RELA-UI-002"})
+        s = (await c.get(f"/api/discovery/{sid}")).json()
+        m2 = next(u for u in s["ui_modules"] if u["ui_id"] == "RELA-UI-002")
+        assert any(x["source"] == "upload" and x["name"] == "Vault setup" for x in m2["doc"]["screens"]), m2["doc"]["screens"]
+        pr = await c.get(f"/api/uiux/{sid}/prototype")
+        assert pr.status_code == 200 and "data-goto" in pr.text and f"/api/uiux/{sid}/file/{fid}" in pr.text and 'id="pNext"' in pr.text
+        pd = await c.get(f"/api/uiux/{sid}/prototype?download=1")
+        assert "data:image/png;base64," in pd.text and "PROTOTYPE" in pd.headers["content-disposition"]
+        open("/tmp/proto_test.html", "w").write(pr.text)
+        # only screen left can't be removed
+        one = next(u for u in s["ui_modules"] if u["ui_id"] == "RELA-UI-003")
+        await post(f"/api/uiux/{sid}/screens/remove", {"item_id": "RELA-UI-003", "screen_id": one["doc"]["screens"][0]["screen_id"]}, 400)
+        s = (await c.get(f"/api/discovery/{sid}")).json(); uis = s["ui_modules"]
         for u in uis:
             await post(f"/api/uiux/{sid}/accept", {"item_id": u["ui_id"]})
             s = await post(f"/api/uiux/{sid}/freeze/{u['ui_id']}", {})

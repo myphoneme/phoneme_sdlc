@@ -44,6 +44,21 @@ export const api = {
   suggestStack: (sid) => post(`/techdesign/${sid}/stack/suggest`, {}),
   saveStack: (sid, stack) => post(`/techdesign/${sid}/stack`, { stack }),
   confirmStack: (sid) => post(`/techdesign/${sid}/stack/confirm`, {}),
+  uploadDesigns: async (sid, ui_id, files, mode = "add") => {
+    const fd = new FormData();
+    [...files].forEach((f) => fd.append("files", f));
+    fd.append("mode", mode);
+    const res = await fetch(`${BASE}/uiux/${sid}/upload/${ui_id}`, { method: "POST", body: fd });
+    if (!res.ok) {
+      let d = await res.text();
+      try { d = JSON.parse(d).detail || d; } catch { /* raw */ }
+      throw new Error(typeof d === "string" ? d : `upload failed (${res.status})`);
+    }
+    return res.json();
+  },
+  updateScreen: (sid, item_id, screen_id, patch) => post(`/uiux/${sid}/screens/update`, { item_id, screen_id, ...patch }),
+  moveScreen: (sid, item_id, screen_id, direction) => post(`/uiux/${sid}/screens/move`, { item_id, screen_id, direction }),
+  removeScreen: (sid, item_id, screen_id) => post(`/uiux/${sid}/screens/remove`, { item_id, screen_id }),
   brdBaseline: (sid) => get(`/brdprd/${sid}/baseline`),
   brdCreateBaseline: (sid) => post(`/brdprd/${sid}/baseline`, {}),
   listSessions: () => get("/discovery"),

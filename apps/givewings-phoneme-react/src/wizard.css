@@ -702,3 +702,30 @@ button.journey-link:hover { background: #faf6f2; }
 @media (max-width: 760px) { .stack-grid { grid-template-columns: minmax(0, 1fr); } .baseline-panel { flex-direction: column; align-items: stretch; } }
 
 @media (max-width: 760px) { .handover-list li { flex-wrap: wrap; } .handover-list li > div { flex: 1 1 200px; } .handover-list a { width: 100%; justify-content: center; } }
+
+/* --- Clickable prototype & uploaded designs (2026-10-06) --- */
+.proto-panel { margin: 0 0 16px; padding: 16px; border: 1px solid #cfe3f7; border-radius: 14px; background: #f4f9ff; }
+.proto-panel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.proto-panel-head > svg { color: #1f4f99; flex-shrink: 0; }
+.proto-panel-head > div:first-of-type { flex: 1 1 340px; }
+.proto-panel-head strong { font: 800 15px Manrope, sans-serif; color: #171717; }
+.proto-panel-head p { margin: 4px 0 0; font-size: 13px; color: #3d3f44; }
+.proto-frame { width: 100%; height: 820px; margin-top: 14px; border: 1px solid #dfe7f0; border-radius: 12px; background: #f7f7f5; }
+.screen-manager { margin: 14px 0; padding: 14px; border: 1px solid #e5e2dd; border-radius: 12px; background: #fbfaf8; }
+.sm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.sm-head a { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.sm-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sm-list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid #ece9e4; border-radius: 10px; background: #fff; }
+.sm-num { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: #f1efec; font: 800 11px Manrope, sans-serif; flex-shrink: 0; }
+.sm-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13.5px; }
+.sm-edit { flex: 1; display: flex; gap: 6px; }
+.sm-edit input { flex: 1; height: 32px; padding: 0 10px; border: 1px solid #e5e2dd; border-radius: 8px; font: 600 13px "DM Sans", sans-serif; }
+.sm-tools { display: flex; gap: 4px; }
+.upload-zone { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px; border: 2px dashed #d9d4cc; border-radius: 12px; background: #fff; }
+.upload-zone.drag { border-color: #ff7200; background: #fff7f0; }
+.upload-zone > svg { color: #b3530a; flex-shrink: 0; }
+.upload-zone > div { flex: 1 1 280px; }
+.upload-zone strong { font: 800 14px Manrope, sans-serif; }
+.upload-zone p { margin: 3px 0 0; font-size: 12.5px; color: #6b6e74; }
+.upload-zone select { height: 36px; border: 1px solid #e5e2dd; border-radius: 8px; padding: 0 8px; font: 600 13px "DM Sans", sans-serif; background: #fff; }
+@media (max-width: 760px) { .proto-frame { height: 640px; } .upload-zone > button, .upload-zone > select { width: 100%; } }
