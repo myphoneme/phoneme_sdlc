@@ -124,6 +124,25 @@ async def run():
         assert len(logos) == 1 and "script" not in logos[0]["svg"] and "onclick" not in logos[0]["svg"], logos
         print("sanitized svg:", logos[0]["svg"][:160])
         s = await post("/api/identity/logo", {"session_id": sid, "logo_id": logos[0]["id"]})
+        # --- Experience Blueprint: template -> edit -> preview -> freeze (required to complete Identity)
+        await post("/api/identity/complete", {"session_id": sid}, 400)
+        cat = (await c.get("/api/identity/blueprint/templates")).json()
+        assert len(cat["templates"]) == 6 and "mobile_otp" in cat["auth_methods"]
+        await post("/api/identity/blueprint/template", {"session_id": sid, "template_key": "nope"}, 404)
+        s = await post("/api/identity/blueprint/template", {"session_id": sid, "template_key": "mobile_diary"})
+        bp = s["brand"]["blueprint"]; assert bp["platforms"] == "both" and bp["primary"] == "mobile" and bp["mobile"]["share_target"]
+        bp["landing_sections"] = ["faq", "download", "bogus", "faq"]; bp["tokens"]["heading_font"] = "Comic Sans"; bp["mobile"]["tabs"] = ["Diary", "Search", "", "Insights", "Profile", "Extra"]
+        s = await post("/api/identity/blueprint", {"session_id": sid, "blueprint": bp})
+        bp = s["brand"]["blueprint"]
+        assert bp["landing_sections"] == ["hero", "faq", "download"] and bp["tokens"]["heading_font"] == "Space Grotesk" and len(bp["mobile"]["tabs"]) == 5, bp
+        pv = await c.get(f"/api/identity/{sid}/blueprint/preview")
+        assert pv.status_code == 200 and 'class="tabbar"' in pv.text and 'class="qr"' in pv.text and "Share to RelayReel" in pv.text and "Send me a code" in pv.text, pv.text[:200]
+        s = await post("/api/identity/blueprint/freeze", {"session_id": sid}); assert s["brand"]["blueprint"]["version"] == "1.0"
+        await post("/api/identity/blueprint", {"session_id": sid, "blueprint": bp}, 409)
+        s = await post("/api/identity/blueprint/unfreeze", {"session_id": sid})
+        s = await post("/api/identity/blueprint/template", {"session_id": sid, "template_key": "saas"})
+        s = await post("/api/identity/blueprint/freeze", {"session_id": sid}); bp = s["brand"]["blueprint"]
+        assert bp["version"] == "1.1" and bp["platforms"] == "web" and bp["frozen"], bp
         s = await post("/api/identity/complete", {"session_id": sid}); assert s["stage"] == "freeze"
         s = await post("/api/wizard/freeze", {"session_id": sid}); assert s["stage"] == "freeze" and len(s["module_specs"]) == 6, s
         biz = [m["name"] for m in s["module_specs"] if m["kind"] == "business"]

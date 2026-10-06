@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException
 from .. import ai_router, store
 from ..locks import session_lock
 from ..models import (
+    BlueprintSaveRequest, BlueprintTemplateRequest,
     ChooseRequest, DomainCheck, DomainCheckRequest, LogoChoiceRequest,
     LogoConcept, Palette, PaletteRequest, SessionRequest, SessionState,
 )
@@ -370,6 +371,101 @@ async def choose_logo(req: LogoChoiceRequest):
     return state
 
 
+# --------------------------------------------------------------------------
+# Experience Blueprint (2026-10-07): portal structure + look, frozen with
+# the brand so the UI/UX stage draws module screens inside an agreed frame.
+# --------------------------------------------------------------------------
+@router.get("/blueprint/templates")
+async def blueprint_templates():
+    from .. import blueprint
+    return {"templates": blueprint.catalogue(), "sections": list(blueprint.SECTIONS), "pages": list(blueprint.PAGES),
+            "auth_methods": blueprint.AUTH_METHODS, "fonts": list(blueprint.FONTS)}
+
+
+@router.get("/{session_id}/blueprint/suggest")
+async def blueprint_suggest(session_id: str):
+    from .. import blueprint
+    return {"template_key": blueprint.suggest(await _get(session_id))}
+
+
+def _editable(state: SessionState):
+    bp = state.brand.blueprint
+    if bp and bp.frozen:
+        raise HTTPException(409, "the experience blueprint is frozen; unfreeze it to make changes")
+
+
+@router.post("/blueprint/template", response_model=SessionState)
+async def blueprint_template(req: BlueprintTemplateRequest):
+    from .. import blueprint
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        _editable(state)
+        try:
+            bp = blueprint.from_template(req.template_key, state)
+        except KeyError:
+            raise HTTPException(404, "unknown template")
+        old = state.brand.blueprint
+        if old:  # keep the version history and module placement
+            bp.version, bp.module_slots = old.version, old.module_slots
+        state.brand.blueprint = bp
+        await store.save_session(state)
+        return state
+
+
+@router.post("/blueprint", response_model=SessionState)
+async def blueprint_save(req: BlueprintSaveRequest):
+    from .. import blueprint
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        _editable(state)
+        bp = blueprint.normalise(req.blueprint)
+        old = state.brand.blueprint
+        bp.version, bp.frozen, bp.frozen_at = (old.version if old else ""), False, ""
+        state.brand.blueprint = bp
+        await store.save_session(state)
+        return state
+
+
+@router.post("/blueprint/freeze", response_model=SessionState)
+async def blueprint_freeze(req: SessionRequest):
+    from .. import blueprint
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        bp = state.brand.blueprint
+        if not bp:
+            raise HTTPException(400, "choose a template first")
+        if bp.frozen:
+            return state
+        state.brand.blueprint = blueprint.freeze(blueprint.normalise(bp), bp.version)
+        await store.save_session(state)
+        return state
+
+
+@router.post("/blueprint/unfreeze", response_model=SessionState)
+async def blueprint_unfreeze(req: SessionRequest):
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        bp = state.brand.blueprint
+        if not bp or not bp.frozen:
+            raise HTTPException(400, "the blueprint is not frozen")
+        bp.frozen = False  # version kept: the next freeze becomes x.(n+1)
+        await store.save_session(state)
+        return state
+
+
+@router.get("/{session_id}/blueprint/preview")
+async def blueprint_preview(session_id: str):
+    from fastapi.responses import HTMLResponse
+    from .. import blueprint, ui_render
+    state = await _get(session_id)
+    bp = state.brand.blueprint
+    if not bp:
+        raise HTTPException(404, "no blueprint yet")
+    mods, nav = blueprint.preview_modules(state, bp)
+    html = ui_render.prototype(state, mods, nav=nav, title="experience blueprint preview")
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
 @router.post("/complete", response_model=SessionState)
 async def complete_identity(req: SessionRequest):
     state = await _get(req.session_id)
@@ -377,6 +473,7 @@ async def complete_identity(req: SessionRequest):
         label for label, ok in (
             ("name", state.selected_name), ("tagline", state.brand.tagline),
             ("colour theme", state.brand.palette), ("logo", state.brand.logo),
+            ("experience blueprint (choose, review and freeze it)", state.brand.blueprint and state.brand.blueprint.frozen),
         ) if not ok
     ]
     if missing:

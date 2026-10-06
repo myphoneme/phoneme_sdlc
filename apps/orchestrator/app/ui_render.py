@@ -82,6 +82,80 @@ def brand_palette(state):
     return Palette(name=state.selected_theme, primary=p, ink=ink, surface=surf, accent=acc)
 
 
+def _bp(state):
+    return state.brand.blueprint if state.brand and state.brand.blueprint else None
+
+
+_BASE_FONTS = ["DM Sans", "Manrope", "Space Grotesk", "IBM Plex Sans"]
+
+
+def fonts_link(state) -> str:
+    bp = _bp(state)
+    fams = list(dict.fromkeys(_BASE_FONTS + ([bp.tokens.heading_font, bp.tokens.body_font] if bp else [])))
+    q = "&".join("family=" + f.replace(" ", "+") + ":wght@400;500;600;700;800" for f in fams)
+    return f"<link rel=preconnect href=https://fonts.googleapis.com><link href='https://fonts.googleapis.com/css2?{q}&display=swap' rel=stylesheet>"
+
+
+SHELL_CSS = """
+.statusbar{display:flex;justify-content:space-between;padding:8px 20px 4px;font-size:12px;background:#fff}.statusbar span{letter-spacing:2px;font-size:10px}
+.frame.mobile .mshell{display:flex;flex-direction:column;min-height:640px}.frame.mobile .mshell .content{flex:1}
+.tabbar{display:flex;justify-content:space-around;border-top:1px solid var(--line);padding:8px 4px 12px;background:#fff}
+.tabbar span{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--mut);min-width:52px}
+.tabbar span i{width:20px;height:20px;border-radius:6px;background:#e9e7e3}.tabbar span.on{color:var(--p);font-weight:700}.tabbar span.on i{background:var(--p)}
+.topnav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:10px 22px;border-bottom:1px solid var(--line);background:#fff}
+.topnav b{font:800 16px Manrope,system-ui,sans-serif;color:var(--p);margin-right:14px}.topnav .ti{font-size:13px;color:var(--mut);padding:6px 10px;border-radius:8px}
+.topnav .ti.on{background:var(--surf);color:var(--p);font-weight:700}.topnav .avatar{margin-left:auto}
+.dl{display:grid;grid-template-columns:1.2fr auto;gap:clamp(24px,5cqi,56px);align-items:center;padding:clamp(40px,7cqi,88px) var(--gut);border-bottom:1px solid var(--sline)}
+.stores{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}.store{display:inline-flex;flex-direction:column;justify-content:center;height:46px;padding:0 18px;border-radius:10px;background:var(--sink);color:#fff;line-height:1.1}
+.store small{font-size:10px;opacity:.75}.store b{font-size:15px}
+.qr{background:#fff;border:1px solid var(--sline);border-radius:18px;padding:16px;text-align:center;box-shadow:0 14px 40px color-mix(in oklab,var(--p) 14%,transparent)}
+.qr svg{width:156px;height:156px;display:block}.qr small{display:block;margin-top:8px;color:var(--ssub);font-size:12px}
+.auth .or{display:flex;align-items:center;gap:10px;margin:16px 0 12px;color:var(--ssub);font-size:13px}.auth .or:before,.auth .or:after{content:"";flex:1;border-top:1px solid var(--sline)}
+.auth .social{display:flex;width:100%;height:40px;margin-top:8px;border:1px solid var(--sline);background:#fff;border-radius:6px;align-items:center;justify-content:center;font-size:14px;font-weight:500}
+@container (max-width:760px){.dl{grid-template-columns:1fr}}
+"""
+
+
+def token_css(state) -> str:
+    bp = _bp(state)
+    if not bp:
+        return ""
+    t = bp.tokens
+    out = [f'.frame,.site{{--fh:"{t.heading_font}",system-ui,sans-serif;--fb:"{t.body_font}",system-ui,sans-serif}}',
+           ".frame .appshell,.frame .main,.frame .content,.frame .mshell,.frame .topnav,.site,.site *{font-family:var(--fb)}",
+           ".frame h3,.frame h4,.frame .stat b,.frame .sb-brand,.frame .topnav b,.site h1,.site h2,.site h3,.site .wm,.site .price{font-family:var(--fh)}"]
+    if t.radius == "sharp":
+        out.append(".frame .card,.frame .tile,.frame .stat,.site .plan,.site .fcard,.site .fcard:nth-child(even),.site .auth,.site .hero-media,.site .ctaband,.site .hm-card,.site .qr{border-radius:6px}"
+                   ".frame .btn,.frame .tab,.site .sbtn,.site .sbtn.pill,.site .eyepill,.site .auth input,.site .auth .social{border-radius:4px}.site .plan.hl{border-radius:6px}")
+    elif t.radius == "soft":
+        out.append(".frame .card,.frame .tile,.frame .stat{border-radius:18px}.frame .btn{border-radius:999px}.site .auth{border-radius:22px}"
+                   ".site .auth input,.site .auth .social{border-radius:12px}.site .sbtn{border-radius:999px}")
+    if t.density == "compact":
+        out.append(".frame .content{gap:9px;padding:14px 18px}.frame .card{padding:10px 12px}.frame td,.frame th{padding:6px 8px}"
+                   ".site .hero{padding-block:clamp(28px,5cqi,64px)}.site .feat,.site .pricing,.site .faq{padding-block:clamp(32px,6cqi,72px)}")
+    return "".join(out)
+
+
+def _qr_svg(seed: str) -> str:
+    """A QR-looking placeholder (finder squares + seeded modules); the real
+    code is generated at build time from the store link."""
+    import hashlib
+    n, bits = 25, hashlib.sha256(seed.encode()).digest() * 3
+    cells = []
+    for y in range(n):
+        for x in range(n):
+            in_finder = any(fx <= x < fx + 7 and fy <= y < fy + 7 for fx, fy in ((0, 0), (n - 7, 0), (0, n - 7)))
+            if in_finder:
+                lx, ly = x % (n - 7) if x >= n - 7 else x, y % (n - 7) if y >= n - 7 else y
+                on = lx in (0, 6) or ly in (0, 6) or (2 <= lx <= 4 and 2 <= ly <= 4)
+            else:
+                i = y * n + x
+                on = bool(bits[i // 8 % len(bits)] >> (i % 8) & 1)
+            if on:
+                cells.append(f'<rect x="{x}" y="{y}" width="1" height="1"/>')
+    return f'<svg viewBox="-1 -1 {n + 2} {n + 2}" aria-label="QR code to download the app" fill="currentColor">{"".join(cells)}</svg>'
+
+
 class Flow:
     """Navigation model for a set of modules: global screen order, link
     resolution (buttons -> named screens, primary button -> next screen),
@@ -204,6 +278,25 @@ def _image(b, ctx) -> str:
     return f'<div class="upload-shot"{_goto(nxt)}><img alt="Uploaded design" src="{E(src)}"></div>'
 
 
+def _tabbar(state, flow, module) -> str:
+    """Bottom tabs of the phone app (from the Experience Blueprint)."""
+    bp = _bp(state)
+    tabs = bp.mobile.tabs if bp and bp.mobile.tabs else []
+    if not tabs:
+        return ""
+    targets = {}
+    if flow:
+        order = [k for k in flow.first_of if not k.lower().startswith("sign-in")]
+        by_slot = {slot.lower(): mod for mod, slot in (bp.module_slots or {}).items()}
+        for i, t in enumerate(tabs):
+            mod = by_slot.get(t.lower()) or next((k for k in flow.first_of if k.lower() == t.lower()), None) or (order[i] if i < len(order) else None)
+            targets[t] = mod
+    active = module.module if module else ""
+    cells = "".join(f'<span class="{"on" if targets.get(t) == active else ""}"{_goto(flow.first_of.get(targets.get(t)) if flow and targets.get(t) else None)}><i></i>{E(t)}</span>'
+                    for t in tabs)
+    return f'<nav class="tabbar">{cells}</nav>'
+
+
 def screen_html(state, screen, nav: list[str], active: str, domain: str, flow=None, module=None) -> str:
     key = flow.key(module, screen) if flow else ""
     ctx = (flow, module, key) if flow else None
@@ -217,23 +310,30 @@ def screen_html(state, screen, nav: list[str], active: str, domain: str, flow=No
                  f'{site_page(state, screen, screen.blocks, flow, ctx)}</div>')
         return f'<div class="frame-scroll">{frame}</div>'
     elif screen.layout == "mobile":
-        inner = f'<div class="topbar"><h3>{E(screen.name)}</h3><span class="avatar"></span></div><div class="content">{body}</div>'
+        inner = (f'<div class="mshell"><div class="topbar"><h3>{E(screen.name)}</h3><span class="avatar"></span></div>'
+                 f'<div class="content">{body}</div>{_tabbar(state, flow, module)}</div>')
+    elif _bp(state) and _bp(state).web.nav == "top":
+        items = "".join(f'<span class="ti{" on" if n == active else ""}"{_goto(flow.first_of.get(n) if flow else None)}>{E(n)}</span>' for n in nav)
+        inner = (f'<div class="topnav"><b>{name}</b>{items}<span class="avatar"></span></div>'
+                 f'<div class="main"><div class="topbar"><h3>{E(screen.name)}</h3></div><div class="content">{body}</div></div>')
     else:
         items = "".join(f'<div class="navitem{" on" if n == active else ""}"{_goto(flow.first_of.get(n) if flow else None)}>{E(n)}</div>' for n in nav)
         inner = (f'<div class="appshell"><aside class="sidebar"><div class="sb-brand">{name}</div>{items}</aside>'
                  f'<div class="main"><div class="topbar"><h3>{E(screen.name)}</h3><span class="avatar"></span></div><div class="content">{body}</div></div></div>')
-    frame = f'<div class="frame{" mobile" if screen.layout == "mobile" else ""}"><div class="chrome"><i></i><i></i><i></i><span class="url">{E(url)}</span></div>{inner}</div>'
+    bar = ('<div class="statusbar"><b>9:41</b><span>▂▄▆ ◔ ▮</span></div>' if screen.layout == "mobile"
+           else f'<div class="chrome"><i></i><i></i><i></i><span class="url">{E(url)}</span></div>')
+    frame = f'<div class="frame{" mobile" if screen.layout == "mobile" else ""}">{bar}{inner}</div>'
     return frame if screen.layout == "mobile" else f'<div class="frame-scroll">{frame}</div>'
 
 
-def page(state, modules, revised: bool = False, title_suffix: str = "UI/UX mockups", asset=None) -> str:
+def page(state, modules, revised: bool = False, title_suffix: str = "UI/UX mockups", asset=None, nav=None) -> str:
     pal = brand_palette(state)
     css = CSS % {
         "primary": (pal.primary if pal else "#FF7200"), "ink": (pal.ink if pal else "#171717"),
         "surface": (pal.surface if pal else "#FFF7F0"), "accent": (pal.accent if pal else "#0F766E"),
-    } + SITE_CSS
+    } + SITE_CSS + SHELL_CSS + token_css(state)
     domain = (state.brand.chosen_domain if state.brand and state.brand.chosen_domain else "app.example.com")
-    nav = [m.module for m in state.ui_modules]
+    nav = nav or [m.module for m in state.ui_modules]
     def num(m, fallback):
         try:
             return int((m.req_id or "").split("-")[-1])
@@ -261,7 +361,7 @@ def page(state, modules, revised: bool = False, title_suffix: str = "UI/UX mocku
     return (
         "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{E(state.selected_name)} — {E(title_suffix)}</title>"
-        "<link rel=preconnect href=https://fonts.googleapis.com><link href='https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Manrope:wght@700;800&family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap' rel=stylesheet>"
+        + fonts_link(state) +
         f"<style>{css}</style></head><body>"
         f'<div class="intro"><div class="brand">{mark}<div><h1>{E(state.selected_name)}</h1><div class="tagline">{tagline}</div></div></div>'
         f'<ul class="stepnav">{stepnav}</ul></div>{"".join(sections)}</body></html>'
@@ -294,7 +394,7 @@ show(location.hash?location.hash.slice(1):0);if(S[i]&&!S[i].classList.contains('
 """
 
 
-def prototype(state, modules, asset=None) -> str:
+def prototype(state, modules, asset=None, nav=None, title: str = "clickable prototype") -> str:
     """Clickable prototype: one screen at a time, real navigation between
     screens (buttons, sidebar, Sign in, uploaded designs), a flow player
     to step through the whole journey, and a toggle that outlines every
@@ -303,10 +403,10 @@ def prototype(state, modules, asset=None) -> str:
     css = CSS % {
         "primary": (pal.primary if pal else "#FF7200"), "ink": (pal.ink if pal else "#171717"),
         "surface": (pal.surface if pal else "#FFF7F0"), "accent": (pal.accent if pal else "#0F766E"),
-    } + SITE_CSS
+    } + SITE_CSS + SHELL_CSS + token_css(state)
     domain = (state.brand.chosen_domain if state.brand and state.brand.chosen_domain else "app.example.com")
     flow = Flow(state, modules, False, asset)
-    nav = [m.module for m in state.ui_modules]
+    nav = nav or [m.module for m in state.ui_modules]
     opts, screens, last_mod = [], [], None
     for n, (m, s, key) in enumerate(flow.items, 1):
         if m is not last_mod:
@@ -327,8 +427,8 @@ def prototype(state, modules, asset=None) -> str:
     body = "".join(screens) or '<div class="section"><h2>No screens yet</h2></div>'
     return (
         "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-        f"<title>{E(state.selected_name)} — clickable prototype</title>"
-        "<link href='https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Manrope:wght@700;800&family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap' rel=stylesheet>"
+        f"<title>{E(state.selected_name)} — {E(title)}</title>"
+        + fonts_link(state) +
         f"<style>{css}{PROTO_CSS}</style></head><body>"
         f'<div class="proto-bar"><b>{E(state.selected_name)}</b><button id="pPrev">← Previous</button>'
         f'<select id="pSel" aria-label="Jump to screen">{"".join(opts)}</select><button id="pNext" class="primary">Next →</button>'
@@ -501,6 +601,12 @@ def site_block(b, ctx=None):
     if t == "faq":
         qs = "".join(f'<details><summary>{E(q)}{_svg("chev")}</summary><p>{E(a)}</p></details>' for q, a in map(_split, b.items[:8]))
         return (f'<section class="faq">{f"<p class=eyebrow>{E(b.eyebrow)}</p>" if b.eyebrow else ""}<h2>{E(b.title)}</h2>{qs}</section>')
+    if t == "download":
+        stores = "".join(f'<span class="store"><small>{"Download on the" if "app store" in x.lower() else "Get it on"}</small><b>{E(x)}</b></span>' for x in (b.items or ["App Store", "Google Play"]))
+        seed = ctx[0].state.selected_name if ctx else "app"
+        return (f'<section class="dl"><div>{f"<p class=eyebrow>{E(b.eyebrow)}</p>" if b.eyebrow else ""}<h2>{E(b.title)}</h2>'
+                f'<p class="lede">{E(b.text)}</p><div class="stores">{stores}</div></div>'
+                f'<div class="qr">{_qr_svg(seed or "app")}<small>Scan to install</small></div></section>')
     if t == "cta":
         return (f'<section class="ctaband"><div>{f"<p class=eyebrow>{E(b.eyebrow)}</p>" if b.eyebrow else ""}<h2>{E(b.title)}</h2>'
                 f'<p>{E(b.text)}</p></div><div>{_site_actions(b, ctx)}</div></section>')
@@ -508,9 +614,12 @@ def site_block(b, ctx=None):
 
 
 def _auth_card(b, ctx):
-    fields = []
+    fields, social = [], []
     for x in b.items:
         parts = [p.strip() for p in x.split("|")]
+        if parts[0].lower() == "social" and len(parts) >= 2:
+            social.append(f'<span class="social"{_goto(_dest(ctx, b.targets, 0))}>{E(parts[1])}</span>')
+            continue
         if parts[0].lower() == "link" and len(parts) >= 2:
             dest = ctx[0].by_name(ctx[1], parts[2]) if ctx and len(parts) > 2 else None
             fields.append(f'<span class="alink"{_goto(dest)}>{E(parts[1])}</span>')
@@ -523,7 +632,7 @@ def _auth_card(b, ctx):
     if len(b.actions) > 1:
         switch = f'<p class="switch">{E(b.note)} <span{_goto(_dest(ctx, b.targets, 1))}>{E(b.actions[1])}</span></p>'
     return (f'<div class="authwrap"><div class="auth"><h2>{E(b.title)}</h2><p class="sub">{E(b.text)}</p>'
-            f'{"".join(fields)}{primary}{switch}</div></div>')
+            f'{"".join(fields)}{primary}{(chr(60) + "div class=or>or" + chr(60) + "/div>" + "".join(social)) if social else ""}{switch}</div></div>')
 
 
 def site_page(state, screen, body_blocks, flow, ctx):
@@ -533,8 +642,14 @@ def site_page(state, screen, body_blocks, flow, ctx):
             if logo and logo.lstrip().startswith("<svg") else "")
     wm = f"{mark}{E(name)}"
     land, sin, sup = (flow.landing, flow.signin, flow.signup) if flow else (None, None, None)
+    bp = _bp(state)
+    secs = bp.landing_sections if bp else ["features", "pricing"]
+    pages = bp.public_pages if bp else ["Pricing", "About"]
+    labels = (["Features"] if "features" in secs else []) + (["Pricing"] if "pricing" in secs or "Pricing" in pages else []) \
+        + [p for p in pages if p not in ("Landing", "Pricing")]
+    links = "".join(f'<span class="hide-s"{_goto(land)}>{E(x)}</span>' for x in labels[:5])
     nav = (f'<nav class="snav"><span class="wm"{_goto(land)}>{wm}</span><div class="links">'
-           f'<span class="hide-s"{_goto(land)}>Features</span><span class="hide-s"{_goto(land)}>Pricing</span><span class="hide-s"{_goto(land)}>About</span>'
+           f'{links}'
            f'{_sbtn("Sign in", sin, "")}{_sbtn("Get started", sup, "solid")}</div></nav>')
     parts, loose = [], []
 

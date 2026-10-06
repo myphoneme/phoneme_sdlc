@@ -3,6 +3,7 @@ import { accessLabel } from "../standard.js";
 import { FlowStepText } from "./RequirementDoc.jsx";
 import { ResearchReportView } from "./ResearchCard.jsx";
 import { IdentitySummary } from "./IdentityStudio.jsx";
+import ExperienceStep from "./ExperienceBlueprint.jsx";
 import { GenerationBoard } from "./Generating.jsx";
 import ReopenScope from "./ReopenScope.jsx";
 import BrdPrdManager from "./BrdPrdManager.jsx";
@@ -54,12 +55,17 @@ function DiscoveryReview({ session }) {
   );
 }
 
-function IdentityReview({ session }) {
+function IdentityReview({ session, setSession }) {
   const b = session.brand || {};
   const domains = b.domains || [];
   return (
     <div className="review-stack">
       {session.selected_name ? <IdentitySummary session={session} /> : <Empty>No identity recorded.</Empty>}
+      <section className="review-section">
+        <h3>Experience blueprint</h3>
+        {!session.brand?.blueprint && <p className="muted small">This idea was branded before experience blueprints existed. Choose one now so the UI/UX stage draws every screen inside an agreed frame.</p>}
+        <ExperienceStep session={session} setSession={setSession} compact />
+      </section>
       {!b.completed && session.selected_theme && !b.palette && (
         <p className="muted small">This idea chose its theme (“{session.selected_theme}”) before the Identity studio existed — no domain, tagline or logo was captured.</p>
       )}
@@ -157,7 +163,7 @@ export default function StageReview({ stage, session, setSession, requirements, 
   if (stage === "uiux") return <UIUXStage session={session} setSession={setSession} />;
   if (stage === "discovery") return <DiscoveryReview session={session} />;
   if (stage === "research") return session.research ? <ResearchReportView research={session.research} /> : <Empty>No research recorded.</Empty>;
-  if (stage === "identity") return <IdentityReview session={session} />;
+  if (stage === "identity") return <IdentityReview session={session} setSession={setSession} />;
   if (stage === "freeze") return <ScopeReview session={session} setSession={setSession} requirements={requirements} />;
   if (stage === "flow") return <FlowReview session={session} />;
   if (stage === "generating") return <GenerationReview session={session} requirements={requirements} />;

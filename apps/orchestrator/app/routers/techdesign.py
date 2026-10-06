@@ -16,7 +16,7 @@ import re
 from fastapi import HTTPException
 from fastapi.responses import Response
 
-from .. import ai_router, export as exporter, reqdoc, review, store
+from .. import blueprint, ai_router, export as exporter, reqdoc, review, store
 from ..models import (
     SessionState, StackCharter, StackSaveRequest, TDApi, TDComponent, TDEntity, TDField,
     TDNfr, TechDesign, TechDoc,
@@ -128,7 +128,8 @@ async def plan(state: SessionState) -> list:
 
 async def draft(state: SessionState, item: TechDesign, instruction: str | None) -> TechDoc:
     reqs = sorted(await store.list_requirements(state.session_id), key=lambda r: r.req_id)
-    head = (f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n"
+    bp_line = (f"Experience Blueprint: {blueprint.summary_text(state.brand.blueprint)}\n" if state.brand and state.brand.blueprint else "")
+    head = (f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n{bp_line}"
             f"Market: {(state.concept_brief.market if state.concept_brief else '') or 'not stated'}\n\n"
             f"Technical Stack Charter (confirmed -- follow it):\n{stack_text(state.stack)}\n\n")
     if item.kind == "hld":
@@ -183,7 +184,9 @@ async def suggest_stack(session_id: str):
         f"Product: {state.selected_name}\nConcept: {state.concept_summary}\n"
         f"Market: {(brief.market if brief else '') or 'not stated'}; platforms: {(brief.platforms if brief else '') or 'not stated'}; "
         f"input channels: {(brief.input_channels if brief else '') or 'not stated'}\nProduct modules:\n{mods}\n\n"
-        "Suggest a Technical Stack Charter for this product. Sensible, mainstream, maintainable choices; "
+        + (f"Experience Blueprint (frozen at Identity; the stack must deliver it):\n{blueprint.summary_text(state.brand.blueprint)}\n\n"
+           if state.brand and state.brand.blueprint else "")
+        + "Suggest a Technical Stack Charter for this product. Sensible, mainstream, maintainable choices; "
         "mark anything that really needs the owner's decision as 'TBD — confirm: <options>'. Include data "
         "residency and the applicable data-protection law for the market. Respond with ONLY JSON with these keys, "
         "each a short paragraph or list in one string: " + ", ".join(k for k, _ in STACK_FIELDS),

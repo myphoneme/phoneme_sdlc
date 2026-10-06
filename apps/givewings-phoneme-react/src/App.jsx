@@ -46,7 +46,7 @@ const aiActions = [
 const STAGE_META = {
   discovery: { icon: MessageCircle, title: 'Discovery Chat', short: 'Shape the concept', desc: 'Describe your idea in plain words. GiveWings AI reflects it back and asks clarifying questions until the scope is clear enough to research.' },
   research: { icon: Search, title: 'Market Research', short: 'Competitors & viability', desc: 'Live, web-grounded research: who already plays in this space, whether it can make money, what to build first — then pick a product name.' },
-  identity: { icon: WandSparkles, title: 'Identity', short: 'Name, domain, logo, colours', desc: 'Lock the brand: pick the name with real domain availability, choose a tagline, build the colour theme, then pick a logo drawn in that theme.' },
+  identity: { icon: WandSparkles, title: 'Identity', short: 'Brand & experience', desc: 'Lock the brand and the experience: pick the name with real domain availability, a tagline, colour theme and logo, then choose and freeze how the website and app are organised and look.' },
   freeze: { icon: Target, title: 'Freeze Scope', short: 'Agree the module list', desc: 'GiveWings AI breaks the product into modules. Rename, describe, add, remove or reorder them — flows are designed only for the modules you freeze here.' },
   flow: { icon: Layers3, title: 'Flow Design', short: 'How each module works', desc: 'Pin down the step-by-step sequence for every module. Edit, reorder, add or remove steps yourself, or comment and let AI rework it — then approve.' },
   generating: { icon: Sparkles, title: 'Drafting BRD/PRD', short: 'AI writes requirements', desc: 'GiveWings AI drafts one requirement document per frozen module. Progress updates live — you can leave and come back.' },

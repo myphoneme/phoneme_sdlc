@@ -54,8 +54,8 @@ title, text, rows [name, price, period, description, 'feature; feature', badge f
 for sign-in / sign-up style pages (a centred card with one form)."""
 
 ACCOUNT_RULE = """
-This is the product's standard Sign-in & Account module. GiveWings adds the Landing page, Create account and
-Sign in screens itself from a standard kit. Give one "Landing page" screen (layout public) whose blocks carry the
+This is the product's standard Sign-in & Account module. GiveWings adds the Landing page, Create account,
+Sign in and first-run Welcome screens itself from the Experience Blueprint. Give one "Landing page" screen (layout public) whose blocks carry the
 copy for this product: hero, promise and faq (and pricing only if the plans are known). Then design only the
 remaining account screens (for example verify one-time code, forgot password, terms acceptance)."""
 
@@ -104,6 +104,26 @@ def parse(d: dict) -> UIDoc:
                  open_questions=[s(x) for x in (d.get("open_questions") or []) if s(x)][:6])
 
 
+def _blueprint_rule(state: SessionState) -> str:
+    """The frozen Experience Blueprint frames every module's screens."""
+    from .. import blueprint
+    bp = state.brand.blueprint if state.brand else None
+    if not bp:
+        return ""
+    if bp.platforms == "mobile":
+        lay = 'Every signed-in screen is a phone screen: use layout "mobile".'
+    elif bp.platforms == "both" and bp.primary == "mobile":
+        lay = ('Design the phone app first: use layout "mobile" for this module\'s screens, and add a layout "app" (web) screen only '
+               'where the web companion does something the phone does not (for example long-form editing or analytics).')
+    elif bp.platforms == "both":
+        lay = ('Design the web app first (layout "app"), and add a layout "mobile" screen only where people need this module '
+               'on the phone (for example approvals or quick capture).')
+    else:
+        lay = 'Signed-in screens use layout "app" (the web app frame).'
+    return ("Experience Blueprint (frozen at Identity -- design inside it, never change navigation, sign-in or the public site):\n"
+            + blueprint.summary_text(bp) + "\n" + lay + "\n\n")
+
+
 async def draft(state: SessionState, item: UIModule, instruction: str | None) -> UIDoc:
     r = await store.get_requirement(state.session_id, item.req_id)
     brd = reqdoc.render_text(r.title, r.doc) if r and r.doc else (r.body if r else "")
@@ -119,6 +139,7 @@ async def draft(state: SessionState, item: UIModule, instruction: str | None) ->
         f"Module: {item.module} ({item.req_id}); who can use it: {access}\n\n"
         f"Baselined BRD/PRD requirement:\n{brd}\n\n"
         + (f"Technical Design API contracts for this module (screens must be buildable on these):\n{apis}\n\n" if apis else "")
+        + _blueprint_rule(state)
         + "Design the screens for this module only. " + SCHEMA
         + (ACCOUNT_RULE if site_kit.is_account(state, item.module) else "")
     )

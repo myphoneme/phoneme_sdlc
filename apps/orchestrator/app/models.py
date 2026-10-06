@@ -123,6 +123,52 @@ class LogoConcept(BaseModel):
     svg: str
 
 
+class ExperienceTokens(BaseModel):
+    heading_font: str = "Space Grotesk"
+    body_font: str = "IBM Plex Sans"
+    radius: str = "rounded"  # sharp | rounded | soft
+    density: str = "comfortable"  # comfortable | compact
+
+
+class AuthSpec(BaseModel):
+    methods: list[str] = ["email_password"]  # email_password | email_otp | mobile_otp | google | apple | sso
+    register_fields: list[str] = ["Name", "Email", "Password"]
+    onboarding: list[str] = []  # first-run steps after sign-up
+
+
+class WebShell(BaseModel):
+    nav: str = "sidebar"  # sidebar | top
+    home: str = "dashboard"  # dashboard | feed | inbox
+
+
+class MobileShell(BaseModel):
+    tabs: list[str] = []  # bottom tabs, max 5
+    share_target: bool = False  # appears in the phone's Share menu
+    push: bool = True
+    offline: bool = False
+
+
+class ExperienceBlueprint(BaseModel):
+    """2026-10-07: the portal's structure and look, decided and frozen at
+    Identity with the brand, so UI/UX only fills module screens into an
+    agreed frame (Phoneme SDLC: Brand & Experience)."""
+    template_key: str = ""
+    platforms: str = "web"  # web | mobile | both
+    primary: str = "web"  # web | mobile
+    tokens: ExperienceTokens = ExperienceTokens()
+    public_pages: list[str] = []  # Landing, Pricing, About, Blog, Contact, Download app
+    landing_sections: list[str] = []  # hero, promise, features, download, pricing, faq, cta (in order)
+    public_features: str = ""  # what visitors may use without signing in
+    auth: AuthSpec = AuthSpec()
+    web: WebShell = WebShell()
+    mobile: MobileShell = MobileShell()
+    module_slots: dict[str, str] = {}  # module name -> sidebar item / tab (filled after Freeze Scope)
+    notes: str = ""
+    version: str = ""  # set when frozen: 1.0, 1.1 ...
+    frozen: bool = False
+    frozen_at: str = ""
+
+
 class BrandIdentity(BaseModel):
     domains: list[DomainCheck] = []
     domain_checked_name: Optional[str] = None
@@ -134,6 +180,7 @@ class BrandIdentity(BaseModel):
     palette: Optional[Palette] = None
     logo_options: list[LogoConcept] = []
     logo: Optional[LogoConcept] = None
+    blueprint: Optional[ExperienceBlueprint] = None
     completed: bool = False
 
 
@@ -364,6 +411,16 @@ class ChooseRequest(BaseModel):
 class PaletteRequest(BaseModel):
     session_id: str
     palette: Palette
+
+
+class BlueprintTemplateRequest(BaseModel):
+    session_id: str
+    template_key: str
+
+
+class BlueprintSaveRequest(BaseModel):
+    session_id: str
+    blueprint: ExperienceBlueprint
 
 
 class LogoChoiceRequest(BaseModel):

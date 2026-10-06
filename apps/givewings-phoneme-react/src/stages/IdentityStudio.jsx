@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, Check, CircleHelp, Globe, Palette as PaletteIcon, PenLine, RefreshCw, Shapes, Type } from "lucide-react";
+import { ArrowRight, Check, CircleHelp, Globe, LayoutTemplate, Palette as PaletteIcon, PenLine, RefreshCw, Shapes, Type } from "lucide-react";
 import { api } from "../api.js";
+import ExperienceStep, { BlueprintSummary } from "./ExperienceBlueprint.jsx";
 
 const STEPS = [
   { key: "name", label: "Name & domain", icon: Globe },
   { key: "tagline", label: "Tagline", icon: Type },
   { key: "colors", label: "Colour theme", icon: PaletteIcon },
   { key: "logo", label: "Logo", icon: Shapes },
+  { key: "experience", label: "Experience blueprint", icon: LayoutTemplate },
   { key: "review", label: "Review", icon: Check },
 ];
 
@@ -35,7 +37,8 @@ function firstOpenStep(s) {
   if (!b.tagline) return 1;
   if (!b.palette) return 2;
   if (!b.logo) return 3;
-  return 4;
+  if (!b.blueprint?.frozen) return 4;
+  return 5;
 }
 
 function Busy({ text }) {
@@ -275,8 +278,9 @@ function ReviewStep({ session, run, busy }) {
   return (
     <div className="id-step">
       <IdentitySummary session={session} />
+      <BlueprintSummary session={session} />
       <div className="sticky-actions">
-        <span className="muted">Next, GiveWings AI breaks {session.selected_name} into modules for you to review.</span>
+        <span className="muted">Next, GiveWings AI breaks {session.selected_name} into modules, and each module is placed into this frame.</span>
         <button className="btn-primary" disabled={busy} onClick={() => run("Locking identity…", () => api.completeIdentity(session.session_id))}>Confirm identity &amp; continue <ArrowRight size={16} /></button>
       </div>
     </div>
@@ -329,7 +333,8 @@ export default function IdentityStudio({ session, setSession }) {
       {step === 1 && <TaglineStep {...props} />}
       {step === 2 && <ColorsStep {...props} />}
       {step === 3 && <LogoStep {...props} />}
-      {step === 4 && <ReviewStep {...props} />}
+      {step === 4 && <ExperienceStep session={session} setSession={setSession} next={next} />}
+      {step === 5 && <ReviewStep {...props} />}
     </div>
   );
 }
