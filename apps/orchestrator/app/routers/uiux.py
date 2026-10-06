@@ -111,7 +111,7 @@ async def draft(state: SessionState, item: UIModule, instruction: str | None) ->
     apis = "\n".join(f"- {a.method} {a.path}: {a.purpose}" for a in (td.doc.apis if td else []))
     spec = next((m for m in state.module_specs if m.name == item.module), None)
     access = {"public": "public (no sign-in)", "mixed": "public trial part + full feature after sign-in"}.get(spec.access if spec else "", "signed-in users")
-    pal = state.brand.palette if state.brand else None
+    pal = ui_render.brand_palette(state)
     prompt = (
         f"Product: {state.selected_name} — {state.brand.tagline if state.brand and state.brand.tagline else ''}\n"
         f"Concept: {state.concept_summary}\nBrand palette: {pal.name + ' ' + pal.mood if pal else 'default'}\n"

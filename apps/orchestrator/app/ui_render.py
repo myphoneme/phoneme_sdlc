@@ -48,6 +48,40 @@ ul.rows{list-style:none;margin:0;padding:0}ul.rows li{display:flex;justify-conte
 """
 
 
+# Ideas started before the Identity studio (2026-10-02) only recorded a
+# colour theme name in state.selected_theme. Map those names to a palette so
+# their screens are still drawn in the brand the owner picked.
+LEGACY_THEMES = {
+    "teal": ("#0F766E", "#10201F", "#F0FDFA", "#F59E0B"),
+    "orange": ("#FF7200", "#171717", "#FFF7F0", "#0F766E"),
+    "blue": ("#2563EB", "#0F172A", "#EFF6FF", "#F59E0B"),
+    "indigo": ("#4F46E5", "#1E1B4B", "#EEF2FF", "#F59E0B"),
+    "purple": ("#7C3AED", "#1F1235", "#F5F3FF", "#F59E0B"),
+    "violet": ("#7C3AED", "#1F1235", "#F5F3FF", "#F59E0B"),
+    "green": ("#15803D", "#0F1F14", "#F0FDF4", "#F59E0B"),
+    "emerald": ("#059669", "#0B1F18", "#ECFDF5", "#F59E0B"),
+    "red": ("#DC2626", "#1F1111", "#FEF2F2", "#0F766E"),
+    "rose": ("#E11D48", "#1F1116", "#FFF1F2", "#0F766E"),
+    "pink": ("#DB2777", "#1F1119", "#FDF2F8", "#0F766E"),
+    "amber": ("#D97706", "#1F160B", "#FFFBEB", "#0F766E"),
+    "slate": ("#334155", "#0F172A", "#F8FAFC", "#F59E0B"),
+    "navy": ("#1E3A8A", "#0B1430", "#EFF6FF", "#F59E0B"),
+}
+
+
+def brand_palette(state):
+    """The product's palette: the Identity studio choice, else the legacy theme name."""
+    if state.brand and state.brand.palette:
+        return state.brand.palette
+    name = (state.selected_theme or "").strip().lower()
+    key = next((k for k in LEGACY_THEMES if k in name), None)
+    if not key:
+        return None
+    from .models import Palette
+    p, ink, surf, acc = LEGACY_THEMES[key]
+    return Palette(name=state.selected_theme, primary=p, ink=ink, surface=surf, accent=acc)
+
+
 class Flow:
     """Navigation model for a set of modules: global screen order, link
     resolution (buttons -> named screens, primary button -> next screen),
@@ -193,7 +227,7 @@ def screen_html(state, screen, nav: list[str], active: str, domain: str, flow=No
 
 
 def page(state, modules, revised: bool = False, title_suffix: str = "UI/UX mockups", asset=None) -> str:
-    pal = state.brand.palette if state.brand and state.brand.palette else None
+    pal = brand_palette(state)
     css = CSS % {
         "primary": (pal.primary if pal else "#FF7200"), "ink": (pal.ink if pal else "#171717"),
         "surface": (pal.surface if pal else "#FFF7F0"), "accent": (pal.accent if pal else "#0F766E"),
@@ -265,7 +299,7 @@ def prototype(state, modules, asset=None) -> str:
     screens (buttons, sidebar, Sign in, uploaded designs), a flow player
     to step through the whole journey, and a toggle that outlines every
     clickable element."""
-    pal = state.brand.palette if state.brand and state.brand.palette else None
+    pal = brand_palette(state)
     css = CSS % {
         "primary": (pal.primary if pal else "#FF7200"), "ink": (pal.ink if pal else "#171717"),
         "surface": (pal.surface if pal else "#FFF7F0"), "accent": (pal.accent if pal else "#0F766E"),
