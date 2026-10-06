@@ -88,6 +88,10 @@ async def fake_check(client, d):
     return DomainCheck(domain=d, status="taken" if d.endswith(".com") and not d.startswith("get") else "available", method="rdap")
 identity.check_domain = fake_check
 
+import tempfile as _tf, pathlib as _pl
+from app import config as _cfg0
+_cfg0.DOCS_DIR = _pl.Path(_tf.mkdtemp())
+
 async def run():
     t = httpx.ASGITransport(app=main.app)
     async with httpx.AsyncClient(transport=t, base_url="http://t") as c:
@@ -283,7 +287,7 @@ async def run():
         s = await post(f"/api/brdprd/{sid}/baseline", {})
         assert s["baselines"][-1]["version"] == "1.1" and "RELA-002" in s["baselines"][-1]["description"]
         x = await c.get(f"/api/brdprd/{sid}/export/brdprd.docx")
-        assert x.status_code == 200 and x.content[:2] == b"PK" and "PHN-RELA-" in x.headers["content-disposition"], x.headers
+        assert x.status_code == 200 and x.content[:2] == b"PK" and "RelayReel_BRD_PRD_v1.1.docx" in x.headers["content-disposition"], x.headers
         open("/tmp/brdprd_test.docx", "wb").write(x.content)
         print("export bytes:", len(x.content), x.headers["content-disposition"])
         # ================= Stage 8: Technical Design =================
@@ -316,7 +320,7 @@ async def run():
         s = await post(f"/api/techdesign/{sid}/baseline", {})
         assert s["stage"] == "uiux" and [b["version"] for b in s["baselines"] if b["doc_type"] == "techdesign"] == ["1.0"]
         x = await c.get(f"/api/techdesign/{sid}/export/techdesign.docx")
-        assert x.status_code == 200 and x.content[:2] == b"PK" and "PHN-RELA-" in x.headers["content-disposition"]
+        assert x.status_code == 200 and x.content[:2] == b"PK" and "RelayReel_TechDesign_v1.0.docx" in x.headers["content-disposition"]
         open("/tmp/td_test.docx", "wb").write(x.content)
         # ================= Stage 9: UI/UX =================
         s = await post(f"/api/uiux/{sid}/generate", {})
@@ -354,7 +358,7 @@ async def run():
         pr = await c.get(f"/api/uiux/{sid}/prototype")
         assert pr.status_code == 200 and "data-goto" in pr.text and f"/api/uiux/{sid}/file/{fid}" in pr.text and 'id="pNext"' in pr.text
         pd = await c.get(f"/api/uiux/{sid}/prototype?download=1")
-        assert "data:image/png;base64," in pd.text and "PROTOTYPE" in pd.headers["content-disposition"]
+        assert "data:image/png;base64," in pd.text and "RelayReel_Prototype_vdraft.html" in pd.headers["content-disposition"], pd.headers
         open("/tmp/proto_test.html", "w").write(pr.text)
         # only screen left can't be removed
         one = next(u for u in s["ui_modules"] if u["ui_id"] == "RELA-UI-003")
@@ -366,6 +370,18 @@ async def run():
         s = await post(f"/api/uiux/{sid}/baseline", {})
         assert s["stage"] == "complete", s["stage"]
         mx = await c.get(f"/api/uiux/{sid}/export/mockups.html")
-        assert mx.status_code == 200 and "PHN-RELA-UIUX_v1.0.html" in mx.headers["content-disposition"]
+        assert mx.status_code == 200 and "RelayReel_UI_UX_Mockups_v1.0.html" in mx.headers["content-disposition"]
+        # --- product folders: every baseline filed, handover zip mirrors the workspace layout
+        fl = (await c.get(f"/api/handover/{sid}/files")).json()
+        want = {"RelayReel/Requirement/RelayReel_BRD_PRD_v1.0.docx", "RelayReel/Requirement/RelayReel_BRD_PRD_v1.1.docx",
+                "RelayReel/Technical/RelayReel_TechDesign_v1.0.docx", "RelayReel/Technical/RelayReel_Technical_Stack_Charter_v1.0.md",
+                "RelayReel/UI-UX/RelayReel_UI_UX_Mockups_v1.0.html", "RelayReel/UI-UX/RelayReel_Prototype_v1.0.html"}
+        assert want <= set(fl["files"]), fl
+        assert any(f.startswith("RelayReel/UI-UX/designs/") for f in fl["files"]), fl
+        zp = await c.get(f"/api/handover/{sid}/pack.zip")
+        import zipfile, io as _io
+        names = set(zipfile.ZipFile(_io.BytesIO(zp.content)).namelist())
+        assert zp.headers["content-disposition"].endswith('RelayReel_SDLC_Pack.zip"') and want <= names, names
+        print("pack:", sorted(names))
         print("ALL OK")
 asyncio.run(run())

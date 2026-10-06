@@ -57,6 +57,7 @@ class Kind:
     record_deferred: Callable[[Any, str], None]                  # doc, text
     ready: Callable[[SessionState], Optional[str]] = lambda s: None  # error if not ready
     merge: Callable[[Any, Any], Any] = lambda old, new: new  # keep user content (e.g. uploads) when a draft lands
+    on_baseline: Optional[Callable[[SessionState], Awaitable[Any]]] = None  # file the documents
 
 
 def items(kind: Kind, state: SessionState) -> list:
@@ -329,6 +330,8 @@ def make_router(kind: Kind) -> APIRouter:
             if state.stage == kind.stage:
                 state.stage = kind.next_stage
             await store.save_session(state)
+            if kind.on_baseline:
+                await kind.on_baseline(state)
             return state
 
     return r

@@ -369,6 +369,8 @@ async def create_baseline(session_id: str):
         if state.stage in ("manager", "generating"):
             state.stage = "techdesign"
         await store.save_session(state)
+        from .. import documents
+        await documents.archive(state, "brdprd")
         return state
 
 

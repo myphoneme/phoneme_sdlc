@@ -729,3 +729,19 @@ button.journey-link:hover { background: #faf6f2; }
 .upload-zone p { margin: 3px 0 0; font-size: 12.5px; color: #6b6e74; }
 .upload-zone select { height: 36px; border: 1px solid #e5e2dd; border-radius: 8px; padding: 0 8px; font: 600 13px "DM Sans", sans-serif; background: #fff; }
 @media (max-width: 760px) { .proto-frame { height: 640px; } .upload-zone > button, .upload-zone > select { width: 100%; } }
+
+/* --- Product folder (2026-10-06) --- */
+.pack-panel { margin: 16px 0; padding: 16px; border: 1px solid #e5e2dd; border-radius: 14px; background: #fff; }
+.pack-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.pack-head > svg { color: #b3530a; flex-shrink: 0; }
+.pack-head > div { flex: 1 1 320px; }
+.pack-head strong { font: 800 15px Manrope, sans-serif; }
+.pack-head p { margin: 3px 0 0; font-size: 13px; color: #3d3f44; }
+.pack-head a { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.folder-tree { list-style: none; margin: 14px 0 0; padding: 12px 14px; border-radius: 10px; background: #fbfaf8; font: 500 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.folder-tree > li + li { margin-top: 8px; }
+.ft-folder { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; color: #171717; }
+.ft-folder svg { color: #b3530a; }
+.folder-tree ul { list-style: none; margin: 4px 0 0 22px; padding: 0; }
+.folder-tree ul li { display: flex; align-items: center; gap: 6px; color: #3d3f44; padding: 1px 0; word-break: break-all; }
+@media (max-width: 760px) { .pack-head a { width: 100%; justify-content: center; } }

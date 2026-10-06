@@ -166,6 +166,7 @@ KIND = review.Kind(
     doc_type="techdesign", label="Technical Design", list_attr="tech_designs", id_attr="td_id",
     gen_attr="tech_generation", stage="techdesign", next_stage="uiux", plan=plan, draft=draft,
     record_deferred=lambda doc, t: doc.risks.append(f"Deferred to a later release: {t}"), ready=ready,
+    on_baseline=lambda state: __import__("app.documents", fromlist=["archive"]).archive(state, "techdesign"),
 )
 router = review.make_router(KIND)
 
@@ -243,3 +244,14 @@ async def export_techdesign(session_id: str):
     data, filename = exporter.techdesign_docx(state, reqs)
     return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+
+@router.get("/{session_id}/export/stack.md")
+async def export_stack(session_id: str):
+    state = await review._session(session_id)
+    if not state.stack:
+        raise HTTPException(400, "no stack charter yet")
+    data, name = exporter.stack_charter_md(state)
+    return Response(content=data, media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})

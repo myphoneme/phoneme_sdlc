@@ -152,7 +152,8 @@ export default function TechDesignStage({ session, setSession }) {
       {error && <div className="error-banner" role="alert">{error}</div>}
       <BaselinePanel label="Technical Design" nextLabel="UI/UX" refreshKey={items.map((i) => i.status).join()}
         fetchStatus={() => api.techdesign.baseline(sid)} onBaseline={async () => setSession(await api.techdesign.createBaseline(sid))}
-        downloads={[{ label: "Technical Design (.docx)", href: fileUrl(`/techdesign/${sid}/export/techdesign.docx`) }]} />
+        downloads={[{ label: "Technical Design (.docx)", href: fileUrl(`/techdesign/${sid}/export/techdesign.docx`) },
+          { label: "Stack charter (.md)", href: fileUrl(`/techdesign/${sid}/export/stack.md`) }]} />
       {items.length > 0 && <p className="muted small">{frozen} of {items.length} documents frozen. Each LLD is numbered to match its BRD/PRD module.</p>}
       <div className="requirement-feed">
         {items.map((t) => (

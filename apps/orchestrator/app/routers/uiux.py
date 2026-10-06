@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
-from .. import ai_router, config, reqdoc, review, store, ui_render
+from .. import ai_router, config, export, reqdoc, review, store, ui_render
 from ..locks import session_lock
 from ..models import ScreenEditRequest, ScreenMoveRequest, SessionState, UIBlock, UIDoc, UIModule, UIScreen
 
@@ -152,6 +152,7 @@ KIND = review.Kind(
     stage="uiux", next_stage="complete", plan=plan, draft=draft,
     record_deferred=lambda doc, t: doc.notes.append(f"Deferred to a later release: {t}"), ready=ready,
     merge=merge,
+    on_baseline=lambda state: __import__("app.documents", fromlist=["archive"]).archive(state, "uiux"),
 )
 router = review.make_router(KIND)
 
@@ -339,17 +340,29 @@ async def render_module(session_id: str, ui_id: str, revised: int = 0):
     return HTMLResponse(ui_render.page(state, [m], revised=bool(revised), asset=_url_asset(session_id)))
 
 
+def _uiux_version(state) -> str:
+    v = [b.version for b in state.baselines if b.doc_type == "uiux"]
+    return v[-1] if v else "draft"
+
+
+def mockups_html(state) -> str:
+    """Offline mockup file (uploaded designs embedded)."""
+    return ui_render.page(state, [m for m in state.ui_modules if m.doc], asset=_inline_asset(state.session_id, state))
+
+
+def prototype_html(state) -> str:
+    """Offline clickable prototype (uploaded designs embedded)."""
+    return ui_render.prototype(state, [m for m in state.ui_modules if m.doc], asset=_inline_asset(state.session_id, state))
+
+
 @router.get("/{session_id}/prototype", response_class=HTMLResponse)
 async def prototype(session_id: str, download: int = 0):
     """Clickable prototype of the whole product, in journey order."""
     state = await review._session(session_id)
-    mods = [m for m in state.ui_modules if m.doc]
     if download:
-        from .techdesign import code
-        v = [b.version for b in state.baselines if b.doc_type == "uiux"]
-        return HTMLResponse(ui_render.prototype(state, mods, asset=_inline_asset(session_id, state)),
-                            headers={"Content-Disposition": f'attachment; filename="PHN-{code(state)}-PROTOTYPE_v{v[-1] if v else "draft"}.html"'})
-    return HTMLResponse(ui_render.prototype(state, mods, asset=_url_asset(session_id)))
+        name = export.file_name(state, "prototype", _uiux_version(state))
+        return HTMLResponse(prototype_html(state), headers={"Content-Disposition": f'attachment; filename="{name}"'})
+    return HTMLResponse(ui_render.prototype(state, [m for m in state.ui_modules if m.doc], asset=_url_asset(session_id)))
 
 
 @router.get("/{session_id}/export/mockups.html")
@@ -357,8 +370,5 @@ async def export_mockups(session_id: str):
     state = await review._session(session_id)
     if not any(m.doc for m in state.ui_modules):
         raise HTTPException(400, "no screens to export yet")
-    v = [b.version for b in state.baselines if b.doc_type == "uiux"]
-    from .techdesign import code
-    name = f"PHN-{code(state)}-UIUX_v{v[-1] if v else 'draft'}.html"
-    return HTMLResponse(ui_render.page(state, [m for m in state.ui_modules if m.doc], asset=_inline_asset(session_id, state)),
-                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+    name = export.file_name(state, "uiux", _uiux_version(state))
+    return HTMLResponse(mockups_html(state), headers={"Content-Disposition": f'attachment; filename="{name}"'})

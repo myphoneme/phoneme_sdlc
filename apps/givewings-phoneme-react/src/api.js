@@ -59,6 +59,7 @@ export const api = {
   updateScreen: (sid, item_id, screen_id, patch) => post(`/uiux/${sid}/screens/update`, { item_id, screen_id, ...patch }),
   moveScreen: (sid, item_id, screen_id, direction) => post(`/uiux/${sid}/screens/move`, { item_id, screen_id, direction }),
   removeScreen: (sid, item_id, screen_id) => post(`/uiux/${sid}/screens/remove`, { item_id, screen_id }),
+  handoverFiles: (sid) => get(`/handover/${sid}/files`),
   brdBaseline: (sid) => get(`/brdprd/${sid}/baseline`),
   brdCreateBaseline: (sid) => post(`/brdprd/${sid}/baseline`, {}),
   listSessions: () => get("/discovery"),

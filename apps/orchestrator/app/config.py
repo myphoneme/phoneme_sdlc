@@ -58,3 +58,7 @@ ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").spl
 from pathlib import Path as _Path
 UPLOAD_DIR = _Path(os.environ.get("UPLOAD_DIR", str(_Path(__file__).resolve().parent.parent / "uploads")))
 UPLOAD_MAX_BYTES = int(os.environ.get("UPLOAD_MAX_BYTES", str(10 * 1024 * 1024)))
+
+# Product document folders (<Product>/Requirement|Technical|UI-UX), one tree
+# per session; every baseline files its version here.
+DOCS_DIR = _Path(os.environ.get("DOCS_DIR", str(_Path(__file__).resolve().parent.parent / "products")))
