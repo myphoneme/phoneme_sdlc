@@ -8,6 +8,8 @@ shown in the portal (iframe) and downloaded as the mockup deliverable, so
 what is reviewed is exactly what is exported.
 """
 import html
+import re
+from urllib.parse import quote
 
 E = lambda s: html.escape(str(s or ""))  # noqa: E731
 
@@ -62,7 +64,14 @@ class Flow:
                 self.items.append((m, s, key))
                 self.first_of.setdefault(m.module, key)
         self.index = {k: i for i, (_, _, k) in enumerate(self.items)}
-        self.signin = next((k for name, k in self.first_of.items() if name.lower().startswith("sign-in")), None)
+        acct = next((k for name, k in self.first_of.items() if name.lower().startswith("sign-in")), None)
+
+        def find(pattern, layouts=None):
+            rx = re.compile(pattern, re.I)
+            return next((k for _, sc, k in self.items if rx.search(sc.name) and (not layouts or sc.layout in layouts)), None)
+        self.landing = find(r"\b(landing|welcome|home ?page)\b", ("public",)) or acct
+        self.signup = find(r"\b(create (an )?account|sign[ -]?up|register|get started)\b") or acct
+        self.signin = find(r"^(sign[ -]?in|log[ -]?in)\b") or acct
 
     def key(self, m, s):
         return f"{m.ui_id}--{s.screen_id or s.name}".replace(" ", "_")
@@ -164,13 +173,15 @@ def _image(b, ctx) -> str:
 def screen_html(state, screen, nav: list[str], active: str, domain: str, flow=None, module=None) -> str:
     key = flow.key(module, screen) if flow else ""
     ctx = (flow, module, key) if flow else None
-    body = "".join(block_html(b, ctx) for b in screen.blocks)
+    body = "" if screen.layout in ("public", "auth") else "".join(block_html(b, ctx) for b in screen.blocks)
     url = f"{domain}{screen.route or '/'}"
     name = E(state.selected_name or "Product")
     if screen.layout == "image":
         inner = f'<div class="content image-content">{body}</div>'
-    elif screen.layout == "public":
-        inner = f'<div class="pubnav"><b>{name}</b><div><span>Features</span><span>Pricing</span><span class="btn btn-primary" style="margin-left:18px"{_goto(flow.signin if flow else None)}>Sign in</span></div></div><div class="content">{body}</div>'
+    elif screen.layout in ("public", "auth"):
+        frame = (f'<div class="frame"><div class="chrome"><i></i><i></i><i></i><span class="url">{E(url)}</span></div>'
+                 f'{site_page(state, screen, screen.blocks, flow, ctx)}</div>')
+        return f'<div class="frame-scroll">{frame}</div>'
     elif screen.layout == "mobile":
         inner = f'<div class="topbar"><h3>{E(screen.name)}</h3><span class="avatar"></span></div><div class="content">{body}</div>'
     else:
@@ -186,7 +197,7 @@ def page(state, modules, revised: bool = False, title_suffix: str = "UI/UX mocku
     css = CSS % {
         "primary": (pal.primary if pal else "#FF7200"), "ink": (pal.ink if pal else "#171717"),
         "surface": (pal.surface if pal else "#FFF7F0"), "accent": (pal.accent if pal else "#0F766E"),
-    }
+    } + SITE_CSS
     domain = (state.brand.chosen_domain if state.brand and state.brand.chosen_domain else "app.example.com")
     nav = [m.module for m in state.ui_modules]
     def num(m, fallback):
@@ -212,11 +223,11 @@ def page(state, modules, revised: bool = False, title_suffix: str = "UI/UX mocku
             )
     tagline = E(state.brand.tagline) if state.brand and state.brand.tagline else ""
     logo = state.brand.logo.svg if state.brand and state.brand.logo else ""
-    mark = f'<img alt="" style="height:44px" src="data:image/svg+xml;utf8,{html.escape(logo)}">' if logo else f'<span class="brand-mark">{E((state.selected_name or "P")[:1])}</span>'
+    mark = f'<img alt="" style="height:44px" src="data:image/svg+xml;charset=utf-8,{E(quote(logo))}">' if logo else f'<span class="brand-mark">{E((state.selected_name or "P")[:1])}</span>'
     return (
         "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{E(state.selected_name)} — {E(title_suffix)}</title>"
-        "<link rel=preconnect href=https://fonts.googleapis.com><link href='https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Manrope:wght@700;800&display=swap' rel=stylesheet>"
+        "<link rel=preconnect href=https://fonts.googleapis.com><link href='https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Manrope:wght@700;800&family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap' rel=stylesheet>"
         f"<style>{css}</style></head><body>"
         f'<div class="intro"><div class="brand">{mark}<div><h1>{E(state.selected_name)}</h1><div class="tagline">{tagline}</div></div></div>'
         f'<ul class="stepnav">{stepnav}</ul></div>{"".join(sections)}</body></html>'
@@ -258,7 +269,7 @@ def prototype(state, modules, asset=None) -> str:
     css = CSS % {
         "primary": (pal.primary if pal else "#FF7200"), "ink": (pal.ink if pal else "#171717"),
         "surface": (pal.surface if pal else "#FFF7F0"), "accent": (pal.accent if pal else "#0F766E"),
-    }
+    } + SITE_CSS
     domain = (state.brand.chosen_domain if state.brand and state.brand.chosen_domain else "app.example.com")
     flow = Flow(state, modules, False, asset)
     nav = [m.module for m in state.ui_modules]
@@ -283,10 +294,238 @@ def prototype(state, modules, asset=None) -> str:
     return (
         "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{E(state.selected_name)} — clickable prototype</title>"
-        "<link href='https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Manrope:wght@700;800&display=swap' rel=stylesheet>"
+        "<link href='https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Manrope:wght@700;800&family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap' rel=stylesheet>"
         f"<style>{css}{PROTO_CSS}</style></head><body>"
         f'<div class="proto-bar"><b>{E(state.selected_name)}</b><button id="pPrev">← Previous</button>'
         f'<select id="pSel" aria-label="Jump to screen">{"".join(opts)}</select><button id="pNext" class="primary">Next →</button>'
         f'<span class="pos" id="pPos"></span><label><input type="checkbox" id="pHl"> Highlight clickable areas</label></div>'
         f"{body}<script>{PROTO_JS}</script></body></html>"
     )
+
+
+# ---------------------------------------------------------------------------
+# Public site & auth pages (2026-10-06). A modern SaaS front door in the
+# product's own brand: tinted neutrals mixed from the brand primary,
+# Space Grotesk display headings over IBM Plex Sans text, a sticky
+# translucent nav, pill CTAs, and a centred auth card for sign-in / sign-up.
+# Sizes follow the frame width (container queries), so the same page reads
+# well in the portal preview, the exported mockup and the prototype.
+# ---------------------------------------------------------------------------
+SITE_CSS = """
+.site{--sbg:color-mix(in oklab,var(--p) 2.5%,#fff);--smut:color-mix(in oklab,var(--p) 4%,#f3f3f3);--sline:color-mix(in oklab,var(--p) 9%,#e4e4e4);
+--sink:color-mix(in oklab,var(--p) 10%,#141414);--ssub:color-mix(in oklab,var(--p) 10%,#4f4f55);--gut:clamp(18px,7cqi,72px);
+container-type:inline-size;background:var(--sbg);color:var(--sink);font:15px/1.6 "IBM Plex Sans",system-ui,sans-serif}
+.site h1,.site h2,.site h3{font-family:"Space Grotesk",system-ui,sans-serif;font-weight:700;color:var(--sink)}
+.snav{position:sticky;top:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px var(--gut);
+background:color-mix(in oklab,var(--sbg) 72%,transparent);backdrop-filter:blur(10px);border-bottom:3px solid var(--p)}
+.snav .wm{font:700 19px "Space Grotesk",system-ui,sans-serif;letter-spacing:-.02em;color:var(--sink)}.snav .wm{display:inline-flex;align-items:center;gap:8px;cursor:pointer}.snav .wm img{height:30px;max-width:90px}
+.snav .links{display:flex;align-items:center;gap:clamp(10px,2.4cqi,26px);font-size:14px;font-weight:500}
+.sbtn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:5px;font:500 14px "IBM Plex Sans",system-ui,sans-serif;color:var(--sink);white-space:nowrap}
+.sbtn.solid{background:var(--p);color:#fff}.sbtn.pill{height:48px;padding:0 30px;border-radius:999px}.sbtn.outline{border:1px solid var(--sline);background:var(--sbg)}
+.sbtn svg{width:16px;height:16px}
+.hero{display:grid;grid-template-columns:1fr 1.05fr;gap:clamp(28px,5cqi,64px);align-items:center;padding:clamp(40px,8cqi,104px) var(--gut);border-bottom:1px solid var(--sline);
+background:radial-gradient(60% 50% at 80% 10%,color-mix(in oklab,var(--p) 9%,transparent),transparent 70%)}
+.eyepill{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border-radius:999px;background:var(--smut);border:1px solid var(--sline);color:var(--p);font:600 12px/1.3 "IBM Plex Sans",system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase}
+.eyepill svg{width:14px;height:14px}
+.hero h1{font-size:clamp(38px,6.6cqi,76px);line-height:1.02;letter-spacing:-.04em;margin:20px 0}
+.lede{font-size:clamp(16px,1.7cqi,19px);color:var(--ssub);max-width:34em;margin:0}
+.ctas{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
+.hero-media{position:relative;aspect-ratio:1/1.05;border-radius:28px;overflow:hidden;box-shadow:0 30px 80px color-mix(in oklab,var(--p) 22%,transparent);
+background:radial-gradient(70% 60% at 30% 20%,color-mix(in oklab,var(--p) 55%,#1b1b2e),#111018 75%)}
+.hero-media .glow{position:absolute;inset:auto -20% -30% -20%;height:70%;background:radial-gradient(50% 50% at 50% 50%,color-mix(in oklab,var(--p) 70%,#7c5cff),transparent 70%);opacity:.55}
+.hm-card{position:absolute;left:9%;right:9%;top:12%;border-radius:18px;background:#ffffff14;border:1px solid #ffffff2e;backdrop-filter:blur(8px);padding:16px;color:#fff}
+.hm-card .bar{display:flex;gap:6px;margin-bottom:12px}.hm-card .bar i{width:9px;height:9px;border-radius:50%;background:#ffffff40}
+.hm-row{display:flex;align-items:center;gap:12px;padding:10px;border-radius:12px;background:#ffffff12;margin-top:8px;font-size:13px}
+.hm-row .th{width:42px;height:32px;border-radius:8px;flex-shrink:0;background:linear-gradient(135deg,color-mix(in oklab,var(--p) 80%,#fff),#5b6cff)}
+.hm-row:nth-child(3) .th{background:linear-gradient(135deg,#22c1a5,#3a7bd5)}.hm-row:nth-child(4) .th{background:linear-gradient(135deg,#f6a04d,#d2495f)}
+.hm-row small{display:block;opacity:.65;font-size:11.5px}
+.hm-chip{position:absolute;bottom:9%;right:7%;padding:10px 14px;border-radius:14px;background:#ffffffe8;color:var(--sink);font:600 13px "IBM Plex Sans",system-ui,sans-serif;box-shadow:0 10px 30px #0004}
+.hm-chip b{color:var(--p)}
+.promise{background:var(--smut);border-bottom:1px solid var(--sline);padding:30px var(--gut);text-align:center}
+.cap{font:600 12px "IBM Plex Sans",system-ui,sans-serif;letter-spacing:.2em;text-transform:uppercase}
+.promise ul{list-style:none;margin:16px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.promise li{display:flex;justify-content:center;align-items:center;gap:10px;padding:6px 16px;font-size:14.5px}.promise li+li{border-left:1px solid var(--sline)}
+.promise svg,.plan li svg{width:16px;height:16px;color:var(--p);flex-shrink:0}
+.feat{display:grid;grid-template-columns:1fr 1.2fr;gap:clamp(28px,6cqi,72px);padding:clamp(48px,9cqi,120px) var(--gut);align-items:start}
+.eyebrow{color:var(--p);font:600 13px "IBM Plex Sans",system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;margin:0 0 12px}
+.site h2{font-size:clamp(30px,4.6cqi,50px);line-height:1.05;letter-spacing:-.035em;margin:0 0 16px}
+.fsteps{display:flex;flex-direction:column;gap:18px;border-left:1px solid var(--sline);padding-left:0}
+.fcard{display:grid;grid-template-columns:52px 1fr;gap:18px;padding:28px 32px;border:1px solid var(--sline);border-radius:12px;background:var(--smut);margin-left:-1px}
+.fcard:nth-child(even){margin-left:clamp(0px,4cqi,42px);border-color:var(--p);border-radius:24px;background:var(--sbg)}
+.ficon{width:50px;height:50px;border-radius:50%;background:var(--p);color:#fff;display:grid;place-items:center}.ficon svg{width:20px;height:20px}
+.fnum{color:var(--p);font:700 12px "IBM Plex Sans",system-ui,sans-serif;letter-spacing:.2em}.fcard h3{font-size:clamp(19px,2.2cqi,24px);letter-spacing:-.02em;margin:4px 0 8px}.fcard p{margin:0;color:var(--ssub)}
+.pricing{background:var(--smut);border-block:1px solid var(--sline);padding:clamp(48px,9cqi,120px) var(--gut)}
+.plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px;margin-top:36px;align-items:start}
+.plan{border:1px solid var(--sline);border-radius:12px;padding:32px 34px;background:var(--sbg)}
+.plan.hl{border-color:var(--p);border-top:6px solid var(--p);border-radius:24px;background:var(--smut)}
+.plan .ph{display:flex;justify-content:space-between;align-items:center;gap:10px}.plan .ph b{font-size:17px}
+.badge{background:var(--p);color:#fff;border-radius:999px;padding:3px 12px;font:600 12.5px "IBM Plex Sans",system-ui,sans-serif}
+.plan .desc{color:var(--ssub);margin:6px 0 18px;font-size:14.5px}.price{font:700 clamp(36px,4.4cqi,48px)/1 "Space Grotesk",system-ui,sans-serif;letter-spacing:-.03em}.price small{font:400 15px "IBM Plex Sans",system-ui,sans-serif;color:var(--ssub);letter-spacing:0;margin-left:4px}
+.plan ul{list-style:none;padding:0;margin:22px 0 26px;display:grid;gap:10px;font-size:14.5px}.plan.hl ul{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.plan li{display:flex;gap:10px;align-items:flex-start}
+.plan .sbtn{width:100%}
+.faq{max-width:760px;margin:0 auto;padding:clamp(48px,9cqi,104px) var(--gut);text-align:center}.faq h2{font-size:clamp(28px,3.6cqi,40px)}
+.faq details{text-align:left;border-bottom:1px solid var(--sline)}.faq summary{list-style:none;display:flex;justify-content:space-between;align-items:center;padding:18px 0;font-weight:500;cursor:pointer}
+.faq summary::-webkit-details-marker{display:none}.faq summary svg{width:16px;height:16px;transition:transform .2s}.faq details[open] summary svg{transform:rotate(180deg)}.faq details p{margin:0 0 18px;color:var(--ssub)}
+.ctaband{margin:0 clamp(12px,4cqi,40px) clamp(48px,8cqi,96px);border-radius:28px;background:var(--p);color:#fff;padding:clamp(32px,5cqi,60px) clamp(24px,5cqi,56px);
+display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end}
+.ctaband .eyebrow{color:#ffffffc0}.ctaband h2{color:#fff;margin:0 0 12px}.ctaband p{margin:0;color:#ffffffd0;font-size:17px}.ctaband .sbtn{background:#fff;color:var(--p);font-weight:600}
+.sfoot{border-top:1px solid var(--sline);padding:44px var(--gut) 28px;display:grid;grid-template-columns:2fr 1fr 1fr;gap:24px;font-size:14.5px}
+.sfoot b{display:block;margin-bottom:10px;font-weight:600}.sfoot .wm{font:700 19px "Space Grotesk",system-ui,sans-serif;margin-bottom:8px}.sfoot span{display:block;margin-bottom:8px}
+.sfoot .copy{grid-column:1/-1;border-top:1px solid var(--sline);padding-top:20px;text-align:center;font-size:13px;color:var(--ssub)}
+.spad{padding:28px var(--gut);display:flex;flex-direction:column;gap:14px}
+.authwrap{display:grid;justify-items:center;padding:clamp(36px,7cqi,72px) 16px clamp(48px,8cqi,88px)}
+.auth{width:100%;max-width:460px;background:var(--smut);border:1px solid var(--sline);border-radius:8px;box-shadow:0 2px 10px #0000000d;padding:28px 26px 24px;text-align:center}
+.auth h2{font-size:26px;letter-spacing:-.02em;margin:0 0 6px}.auth .sub{margin:0 0 22px;font-size:14.5px}
+.auth .af{text-align:left;margin-bottom:16px}.auth label{display:block;font-size:14px;font-weight:500;margin-bottom:6px}
+.auth input{width:100%;height:40px;border:1px solid var(--sline);border-radius:6px;background:#fff;padding:0 12px;font:14px "IBM Plex Sans",system-ui,sans-serif;color:var(--sink)}
+.auth .alink{display:block;text-align:right;margin:-8px 0 14px;font-size:13px;color:var(--p)}
+.auth .sbtn.solid{width:100%;height:42px}.auth .switch{margin:16px 0 0;font-size:14px}.auth .switch span{color:var(--p);cursor:pointer}
+@container (max-width:760px){.hero,.feat,.ctaband{grid-template-columns:1fr}.hero-media{aspect-ratio:4/3}.snav .links .hide-s{display:none}.sfoot{grid-template-columns:1fr 1fr}.sfoot>div:first-child{grid-column:1/-1}
+.promise li+li{border-left:0}.fcard:nth-child(even){margin-left:0}}
+"""
+
+_ICON = {
+    "bolt": '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+    "chart": '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+    "layers": '<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>',
+    "send": '<path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/>',
+    "check": '<path d="M20 6 9 17l-5-5"/>',
+    "arrow": '<path d="M5 12h14M13 5l7 7-7 7"/>',
+    "chev": '<path d="m6 9 6 6 6-6"/>',
+    "spark": '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+}
+
+
+def _svg(name: str) -> str:
+    return (f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+            f'stroke-linejoin="round" aria-hidden="true">{_ICON[name]}</svg>')
+
+
+def _dest(ctx, targets, i):
+    if not ctx:
+        return None
+    flow, m, key = ctx
+    tgt = targets[i] if targets and i < len(targets) else ""
+    if tgt.startswith("#"):
+        return None
+    return flow.by_name(m, tgt) if tgt else (flow.next_of(key) if i == 0 else None)
+
+
+def _sbtn(label, dest=None, cls="", icon=None, extra=""):
+    ic = _svg(icon) if icon else ""
+    return f'<span class="sbtn {cls}"{_goto(dest)}{extra}>{E(label)}{ic}</span>'
+
+
+_SCROLL_FEAT = ' onclick="var f=this.closest(\'.site\').querySelector(\'.feat\');if(f)f.scrollIntoView({behavior:\'smooth\'})" style="cursor:pointer"'
+
+
+def _site_actions(b, ctx, first_icon="arrow"):
+    out = []
+    for i, a in enumerate(b.actions[:2]):
+        tgt = b.targets[i] if b.targets and i < len(b.targets) else ""
+        extra = _SCROLL_FEAT if tgt.startswith("#") else ""
+        out.append(_sbtn(a, _dest(ctx, b.targets, i), "pill solid" if i == 0 else "pill outline", first_icon if i == 0 else None, extra))
+    return "".join(out)
+
+
+def site_block(b, ctx=None):
+    """Full-width section for the public-site block types; None if not one."""
+    t = b.type
+    if t == "hero":
+        rows = [_split(x) for x in (b.items or [])][:3]
+        rows = rows or [("Your workspace", "Everything in one place"), ("Today's highlights", "Ready when you are"), ("Shared with your team", "One click")]
+        media_rows = "".join(f'<div class="hm-row"><span class="th"></span><div>{E(a)}<small>{E(c)}</small></div></div>' for a, c in rows)
+        name = E(ctx[0].state.selected_name) if ctx else ""
+        eyebrow = f'<span class="eyepill">{_svg("spark")}{E(b.eyebrow)}</span>' if b.eyebrow else ""
+        return (f'<section class="hero"><div>{eyebrow}'
+                f'<h1>{E(b.title)}</h1><p class="lede">{E(b.text)}</p><div class="ctas">{_site_actions(b, ctx)}</div></div>'
+                f'<div class="hero-media" aria-hidden="true"><span class="glow"></span><div class="hm-card"><div class="bar"><i></i><i></i><i></i></div>'
+                f'{media_rows}</div><div class="hm-chip"><b>{name}</b> · live preview</div></div></section>')
+    if t == "promise":
+        lis = "".join(f"<li>{_svg('check')}<span>{E(x)}</span></li>" for x in b.items[:4])
+        return f'<section class="promise"><div class="cap">{E(b.eyebrow or b.title)}</div><ul>{lis}</ul></section>'
+    if t == "features":
+        icons = ["bolt", "chart", "layers", "send"]
+        cards = "".join(
+            f'<div class="fcard"><span class="ficon">{_svg(icons[i % 4])}</span><div><div class="fnum">{i + 1:02d}</div><h3>{E(a)}</h3><p>{E(c)}</p></div></div>'
+            for i, (a, c) in enumerate(map(_split, b.items[:5])))
+        return (f'<section class="feat"><div>{f"<p class=eyebrow>{E(b.eyebrow)}</p>" if b.eyebrow else ""}<h2>{E(b.title)}</h2>'
+                f'<p class="lede">{E(b.text)}</p></div><div class="fsteps">{cards}</div></section>')
+    if t == "pricing":
+        plans = []
+        for row in b.rows[:3]:
+            name, price, period, desc, feats, badge = (list(row) + [""] * 6)[:6]
+            hl = bool(badge)
+            lis = "".join(f"<li>{_svg('check')}<span>{E(f.strip())}</span></li>" for f in feats.split(";") if f.strip())
+            dest = ctx[0].signup if ctx else None
+            plans.append(
+                f'<div class="plan{" hl" if hl else ""}"><div class="ph"><b>{E(name)}</b>{f"<span class=badge>{E(badge)}</span>" if badge else ""}</div>'
+                f'<p class="desc">{E(desc)}</p><div class="price">{E(price)}{f"<small>{E(period)}</small>" if period else ""}</div>'
+                f'<ul>{lis}</ul>{_sbtn("Start with " + name, dest, "pill " + ("solid" if hl else "outline"))}</div>')
+        return (f'<section class="pricing">{f"<p class=eyebrow>{E(b.eyebrow)}</p>" if b.eyebrow else ""}<h2>{E(b.title)}</h2>'
+                f'<p class="lede">{E(b.text)}</p><div class="plans">{"".join(plans)}</div></section>')
+    if t == "faq":
+        qs = "".join(f'<details><summary>{E(q)}{_svg("chev")}</summary><p>{E(a)}</p></details>' for q, a in map(_split, b.items[:8]))
+        return (f'<section class="faq">{f"<p class=eyebrow>{E(b.eyebrow)}</p>" if b.eyebrow else ""}<h2>{E(b.title)}</h2>{qs}</section>')
+    if t == "cta":
+        return (f'<section class="ctaband"><div>{f"<p class=eyebrow>{E(b.eyebrow)}</p>" if b.eyebrow else ""}<h2>{E(b.title)}</h2>'
+                f'<p>{E(b.text)}</p></div><div>{_site_actions(b, ctx)}</div></section>')
+    return None
+
+
+def _auth_card(b, ctx):
+    fields = []
+    for x in b.items:
+        parts = [p.strip() for p in x.split("|")]
+        if parts[0].lower() == "link" and len(parts) >= 2:
+            dest = ctx[0].by_name(ctx[1], parts[2]) if ctx and len(parts) > 2 else None
+            fields.append(f'<span class="alink"{_goto(dest)}>{E(parts[1])}</span>')
+            continue
+        label, ph = parts[0], (parts[1] if len(parts) > 1 else parts[0])
+        typ = "password" if "password" in label.lower() else ("email" if "email" in label.lower() else "text")
+        fields.append(f'<div class="af"><label>{E(label)}</label><input type="{typ}" placeholder="{E(ph)}"></div>')
+    primary = _sbtn(b.actions[0], _dest(ctx, b.targets, 0), "solid") if b.actions else ""
+    switch = ""
+    if len(b.actions) > 1:
+        switch = f'<p class="switch">{E(b.note)} <span{_goto(_dest(ctx, b.targets, 1))}>{E(b.actions[1])}</span></p>'
+    return (f'<div class="authwrap"><div class="auth"><h2>{E(b.title)}</h2><p class="sub">{E(b.text)}</p>'
+            f'{"".join(fields)}{primary}{switch}</div></div>')
+
+
+def site_page(state, screen, body_blocks, flow, ctx):
+    name = state.selected_name or "Product"
+    logo = state.brand.logo.svg if state.brand and state.brand.logo else ""
+    mark = (f'<img alt="" onerror="this.remove()" src="data:image/svg+xml;charset=utf-8,{E(quote(logo))}">'
+            if logo and logo.lstrip().startswith("<svg") else "")
+    wm = f"{mark}{E(name)}"
+    land, sin, sup = (flow.landing, flow.signin, flow.signup) if flow else (None, None, None)
+    nav = (f'<nav class="snav"><span class="wm"{_goto(land)}>{wm}</span><div class="links">'
+           f'<span class="hide-s"{_goto(land)}>Features</span><span class="hide-s"{_goto(land)}>Pricing</span><span class="hide-s"{_goto(land)}>About</span>'
+           f'{_sbtn("Sign in", sin, "")}{_sbtn("Get started", sup, "solid")}</div></nav>')
+    parts, loose = [], []
+
+    def flush():
+        if loose:
+            parts.append(f'<div class="spad">{"".join(loose)}</div>')
+            loose.clear()
+
+    auth_done = False
+    for b in body_blocks:
+        if screen.layout == "auth" and b.type == "form" and not auth_done:
+            flush()
+            parts.append(_auth_card(b, ctx))
+            auth_done = True
+            continue
+        sec = site_block(b, ctx)
+        if sec is None:
+            loose.append(block_html(b, ctx))
+        else:
+            flush()
+            parts.append(sec)
+    flush()
+    tagline = state.brand.tagline if state.brand and state.brand.tagline else ""
+    foot = (f'<footer class="sfoot"><div><div class="wm">{E(name)}</div><span>{E(tagline)}</span></div>'
+            f'<div><b>Product</b><span{_goto(land)}>Features</span><span{_goto(land)}>Pricing</span><span>About</span></div>'
+            f'<div><b>Support</b><span{_goto(sin)}>Sign in</span><span>Help centre</span><span>Privacy &amp; terms</span></div>'
+            f'<div class="copy">© {E(name)}. All rights reserved.</div></footer>')
+    return f'<div class="site">{nav}{"".join(parts)}{foot}</div>'

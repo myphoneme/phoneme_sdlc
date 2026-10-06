@@ -330,7 +330,12 @@ async def run():
             if s["ui_generation"]["status"] != "running": break
         uis = s["ui_modules"]
         assert s["ui_generation"]["status"] == "done" and len(uis) == 6 and uis[0]["ui_id"] == "RELA-UI-001", [u["ui_id"] for u in uis]
-        assert uis[0]["doc"]["screens"][0]["blocks"][2]["type"] == "text"
+        acc = uis[0]["doc"]["screens"]
+        assert [(x["name"], x["layout"], x["source"]) for x in acc[:3]] == [("Landing page", "public", "kit"), ("Create account", "auth", "kit"), ("Sign in", "auth", "kit")], acc[:3]
+        assert [b["type"] for b in acc[0]["blocks"]] == ["hero", "promise", "features", "pricing", "faq", "cta"]
+        assert next(x for x in acc if x["source"] != "kit")["blocks"][2]["type"] == "text"  # unknown block type -> text
+        h1 = (await c.get(f"/api/uiux/{sid}/render/RELA-UI-001")).text
+        assert 'class="site"' in h1 and 'class="hero"' in h1 and 'class="auth"' in h1 and "Space+Grotesk" in h1
         hx = await c.get(f"/api/uiux/{sid}/render/RELA-UI-002")
         assert hx.status_code == 200 and "Vault inbox" in hx.text and "#0F766E" in hx.text, hx.text[:300]
         open("/tmp/ui_test.html", "w").write(hx.text)

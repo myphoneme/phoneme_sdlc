@@ -473,7 +473,10 @@ class TechDesign(BaseModel):
 
 class UIBlock(BaseModel):
     type: str = "text"  # header|text|list|cards|form|buttons|table|tabs|stats|notice|steps|media
+    # public site blocks (2026-10-06): hero|promise|features|pricing|faq|cta
     title: str = ""
+    eyebrow: str = ""  # small caps label above a site section heading
+    note: str = ""  # auth forms: text before the switch link ("Don't have an account?")
     text: str = ""
     items: list[str] = []
     columns: list[str] = []
@@ -487,10 +490,10 @@ class UIScreen(BaseModel):
     name: str
     purpose: str = ""
     route: str = ""
-    layout: str = "app"  # app | public | mobile | image (uploaded design)
+    layout: str = "app"  # app | public | auth | mobile | image (uploaded design)
     blocks: list[UIBlock] = []
     states: list[str] = []
-    source: str = "ai"  # ai | upload
+    source: str = "ai"  # ai | upload | kit (GiveWings public-site kit)
     asset_id: str = ""  # uploaded file id when source == upload
 
 

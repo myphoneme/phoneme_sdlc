@@ -16,20 +16,21 @@ from pathlib import Path
 from fastapi import File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
-from .. import ai_router, config, export, reqdoc, review, store, ui_render
+from .. import ai_router, config, export, reqdoc, review, site_kit, store, ui_render
 from ..locks import session_lock
 from ..models import ScreenEditRequest, ScreenMoveRequest, SessionState, UIBlock, UIDoc, UIModule, UIScreen
 
-BLOCK_TYPES = {"header", "text", "list", "cards", "form", "buttons", "table", "tabs", "stats", "notice", "steps", "media"}
+BLOCK_TYPES = {"header", "text", "list", "cards", "form", "buttons", "table", "tabs", "stats", "notice", "steps", "media",
+               "hero", "promise", "features", "pricing", "faq", "cta"}
 
 SCHEMA = """Respond with ONLY one JSON object:
 {
   "screens": [
     {"name": "<screen name>", "purpose": "<one sentence: what the user does here>", "route": "/path",
-     "layout": "app|public|mobile",
+     "layout": "app|public|auth|mobile",
      "blocks": [
        {"type": "header|text|list|cards|form|buttons|table|tabs|stats|notice|steps|media",
-        "title": "<optional heading>", "text": "<optional text>",
+        "title": "<optional heading>", "text": "<optional text>", "eyebrow": "<optional short caps label>",
         "items": ["<list rows / card 'Title — detail' / form field labels / tab names / 'Stat label: value' / step names>"],
         "columns": ["<table columns>"], "rows": [["<table cells>"]],
         "actions": ["<button label, primary first; to show where it leads write 'Label -> Exact screen name'>"]}
@@ -43,7 +44,20 @@ SCHEMA = """Respond with ONLY one JSON object:
 for this product (real-looking names, items and numbers -- never lorem ipsum). Use layout "public" only for
 screens visitors use without signing in. Make the screens a navigable flow: the primary button on each
 screen should lead to the next step ('Continue -> <next screen name>'); secondary buttons may lead back or
-to another screen of this module."""
+to another screen of this module.
+Public pages are drawn as a modern marketing site in the product's brand. For screens with layout "public" you may
+also use these block types: "hero" (eyebrow, title = a short bold promise of 4-8 words, text = one-sentence
+value proposition, items = 3 'Item — detail' rows shown in the product preview), "promise" (eyebrow + 3 short
+reassurances), "features" (eyebrow, title, text, items 'Step name — what the user gets'), "pricing" (eyebrow,
+title, text, rows [name, price, period, description, 'feature; feature', badge for the recommended plan]),
+"faq" (eyebrow, title, items 'Question — answer') and "cta" (eyebrow, title, text, actions). Layout "auth" is
+for sign-in / sign-up style pages (a centred card with one form)."""
+
+ACCOUNT_RULE = """
+This is the product's standard Sign-in & Account module. GiveWings adds the Landing page, Create account and
+Sign in screens itself from a standard kit. Give one "Landing page" screen (layout public) whose blocks carry the
+copy for this product: hero, promise and faq (and pricing only if the plans are known). Then design only the
+remaining account screens (for example verify one-time code, forgot password, terms acceptance)."""
 
 
 async def plan(state: SessionState) -> list:
@@ -80,11 +94,11 @@ def parse(d: dict) -> UIDoc:
                 items=[s(x) for x in (b.get("items") or []) if s(x)][:12],
                 columns=[s(x) for x in (b.get("columns") or [])][:8],
                 rows=[[s(c) for c in row][:8] for row in (b.get("rows") or []) if isinstance(row, list)][:8],
-                actions=acts, targets=tgts,
+                actions=acts, targets=tgts, eyebrow=s(b.get("eyebrow")), note=s(b.get("note")),
             ))
         lay = s(sc.get("layout")).lower()
         screens.append(UIScreen(screen_id=f"S{i}", name=s(sc["name"]), purpose=s(sc.get("purpose")),
-                                route=s(sc.get("route")), layout=lay if lay in ("app", "public", "mobile") else "app",
+                                route=s(sc.get("route")), layout=lay if lay in ("app", "public", "auth", "mobile") else "app",
                                 blocks=blocks, states=[s(x) for x in (sc.get("states") or []) if s(x)][:5]))
     return UIDoc(screens=screens, notes=[s(x) for x in (d.get("notes") or []) if s(x)],
                  open_questions=[s(x) for x in (d.get("open_questions") or []) if s(x)][:6])
@@ -106,6 +120,7 @@ async def draft(state: SessionState, item: UIModule, instruction: str | None) ->
         f"Baselined BRD/PRD requirement:\n{brd}\n\n"
         + (f"Technical Design API contracts for this module (screens must be buildable on these):\n{apis}\n\n" if apis else "")
         + "Design the screens for this module only. " + SCHEMA
+        + (ACCOUNT_RULE if site_kit.is_account(state, item.module) else "")
     )
     if instruction and item.doc:
         cur = item.doc.model_copy(update={"screens": [x for x in item.doc.screens if x.source != "upload"]})
@@ -122,9 +137,11 @@ async def draft(state: SessionState, item: UIModule, instruction: str | None) ->
         doc = parse(reqdoc._extract_json(result["text"]))
     except (ValueError, json.JSONDecodeError):
         raise RuntimeError("the AI did not return usable screens")
-    if not doc.screens and not uploaded:
+    account = site_kit.is_account(state, item.module)
+    if not doc.screens and not uploaded and not account:
         raise RuntimeError("the AI returned no screens")
-    return merge(item.doc, doc)
+    merged = merge(item.doc, doc)
+    return site_kit.apply(state, merged) if account else merged
 
 
 def merge(old: UIDoc | None, new: UIDoc) -> UIDoc:
