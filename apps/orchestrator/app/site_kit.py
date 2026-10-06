@@ -127,7 +127,7 @@ def apply(state, doc: UIDoc) -> UIDoc:
     ai_landing, rest = None, []
     for s in doc.screens:
         n = s.name
-        other = re.search(r"verif|code|otp|forgot|reset|recover|terms|privacy", n, re.I)
+        other = re.search(r"verif|code|otp|forgot|reset|recover|terms|privacy|password|2fa|post-?auth|redirect|silent|session|sso", n, re.I)
         replaced = s.source == "kit" or (s.source != "upload" and not other and (_LANDING_RE.search(n) or _REGISTER_RE.search(n) or _SIGNIN_RE.search(n)))
         if not replaced:
             rest.append(s)
