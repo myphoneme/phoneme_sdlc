@@ -50,6 +50,15 @@ async def fake(feature, prompt, system=None):
             "apis": [{"method": "post", "path": "/api/items", "purpose": "create", "request": "url", "response": "item"}],
             "sequence": ["Client calls API", "API saves"], "edge_cases": ["duplicate -> merge"], "security": ["owner-only access"],
             "nfr": [{"requirement": "fast", "approach": "index"}], "open_questions": []})}
+    if f == ai_router.Feature.TECH_DESIGN_GENERATION and "Write the UX Flow & Design Specification" in prompt:
+        names = re.findall(r"^- (.+?) \[", prompt.split("use these names exactly):")[1].split("\n\n")[0], re.M)
+        api = "DELETE /api/nowhere" if "use a bogus api" in prompt else ("POST /api/items" if "POST /api/items" in prompt else "")
+        steps = [{"actor": "User", "action": f"opens {n}", "screen": n, "response": "shows it", "background": "analysing on the server" if i == 0 else "",
+                  "api": api if i == 0 else "", "criteria": [f"Given a signed-in user, when they open {n}, then it loads within 2 seconds"]} for i, n in enumerate(names)]
+        return {"text": json.dumps({"journeys": [{"title": "Main path", "persona": "Creator", "trigger": "Wants to save a link", "outcome": "The item is in the vault",
+                                                  "entry_from": "outside the product", "exits_to": "", "steps": steps}, {"title": "empty", "steps": "bad"}],
+                                    "screen_states": [{"screen": n, "empty": "Nothing saved yet — share a link", "loading": "Analysing…", "error": "Couldn't load — retry", "offline": "n/a"} for n in names],
+                                    "microcopy": ["Vault inbox · empty state: Nothing saved yet"], "notes": ["Journeys stay inside the module"], "open_questions": []})}
     if f == ai_router.Feature.TECH_DESIGN_GENERATION and "Design the screens" in prompt:
         return {"text": json.dumps({"screens": [{"name": "Vault inbox", "purpose": "See captured items", "route": "/inbox", "layout": "app",
             "blocks": [{"type": "stats", "items": ["Items this week: 42"]}, {"type": "list", "title": "Latest", "items": ["AI chips article — Article"]},
@@ -392,14 +401,65 @@ async def run():
             await post(f"/api/uiux/{sid}/accept", {"item_id": u["ui_id"]})
             s = await post(f"/api/uiux/{sid}/freeze/{u['ui_id']}", {})
         s = await post(f"/api/uiux/{sid}/baseline", {})
-        assert s["stage"] == "complete", s["stage"]
+        assert s["stage"] == "uxflow", s["stage"]
+        # --- Stage 10: UX Flow & Design Specification (journeys, states, gates) -> Ready to Build
+        gr = (await c.get(f"/api/uxflow/{sid}/gates")).json()
+        assert not gr["passed"] and any(g["key"] == "trace" and not g["ok"] for g in gr["gates"]), gr
+        s = await post(f"/api/uxflow/{sid}/generate", {})
+        for _ in range(100):
+            await asyncio.sleep(0.1)
+            s = (await c.get(f"/api/discovery/{sid}")).json()
+            if s["ux_generation"]["status"] != "running": break
+        fls = s["ux_flows"]
+        assert s["ux_generation"]["status"] == "done" and [f["fl_id"] for f in fls] == [u["ui_id"].replace("-UI-", "-FL-") for u in s["ui_modules"]], fls
+        f0 = fls[1]
+        assert len(f0["doc"]["journeys"]) == 1 and f0["doc"]["journeys"][0]["steps"][0]["step_id"] == f0["fl_id"] + ".J1.1", f0["doc"]
+        nm = (await c.get(f"/api/uxflow/{sid}/navmap")).json()
+        assert nm["entry"] and len(nm["nodes"]) == sum(len(u["doc"]["screens"]) for u in s["ui_modules"]), nm
+        gr = (await c.get(f"/api/uxflow/{sid}/gates")).json()
+        print("gates:", [(g["key"], g["ok"], g["detail"][:2]) for g in gr["gates"]])
+        nav = next(g for g in gr["gates"] if g["key"] == "navigation")
+        assert not gr["passed"] and gr["failed"] == 1 and nav["detail"] == ["Sign-in & Account · Vault inbox: nothing leads here"], gr
+        # fix it the real way: unfreeze the UI module, remove the stray screen, re-baseline UI/UX (v1.1)
+        u1 = next(u for u in s["ui_modules"] if u["ui_id"] == "RELA-UI-001")
+        stray = next(x for x in u1["doc"]["screens"] if x["name"] == "Vault inbox")
+        await post(f"/api/uiux/{sid}/unfreeze/RELA-UI-001", {})
+        await post(f"/api/uiux/{sid}/screens/remove", {"item_id": "RELA-UI-001", "screen_id": stray["screen_id"]})
+        gr = (await c.get(f"/api/uxflow/{sid}/gates")).json()
+        assert not next(g for g in gr["gates"] if g["key"] == "screens_frozen")["ok"], gr
+        await post(f"/api/uiux/{sid}/accept", {"item_id": "RELA-UI-001"})
+        await post(f"/api/uiux/{sid}/freeze/RELA-UI-001", {})
+        s = await post(f"/api/uiux/{sid}/baseline", {})
+        assert [b["version"] for b in s["baselines"] if b["doc_type"] == "uiux"] == ["1.0", "1.1"] and s["stage"] == "uxflow", s["stage"]
+        gr = (await c.get(f"/api/uxflow/{sid}/gates")).json()
+        assert gr["passed"], gr
+        # a step that calls an API the Technical Design doesn't have blocks the baseline
+        s = await post(f"/api/uxflow/{sid}/comment", {"item_id": f0["fl_id"], "comment": "use a bogus api"})
+        await post(f"/api/uxflow/{sid}/accept", {"item_id": f0["fl_id"]})
+        for f in s["ux_flows"]:
+            await post(f"/api/uxflow/{sid}/accept", {"item_id": f["fl_id"]})
+            s = await post(f"/api/uxflow/{sid}/freeze/{f['fl_id']}", {})
+        r = await c.post(f"/api/uxflow/{sid}/baseline", json={}); assert r.status_code == 409 and "Technical Design" in r.text, r.text
+        await post(f"/api/uxflow/{sid}/unfreeze/{f0['fl_id']}", {})
+        await post(f"/api/uxflow/{sid}/comment", {"item_id": f0["fl_id"], "comment": "use the real api"})
+        await post(f"/api/uxflow/{sid}/accept", {"item_id": f0["fl_id"]})
+        await post(f"/api/uxflow/{sid}/freeze/{f0['fl_id']}", {})
+        s = await post(f"/api/uxflow/{sid}/baseline", {})
+        assert s["stage"] == "complete" and [b["version"] for b in s["baselines"] if b["doc_type"] == "uxflow"] == ["1.0"], s["stage"]
+        dx = await c.get(f"/api/uxflow/{sid}/export/uxs.docx")
+        assert dx.status_code == 200 and "RelayReel_UX_Flow_Spec_v1.0.docx" in dx.headers["content-disposition"], dx.headers
+        open("/tmp/uxs_test.docx", "wb").write(dx.content)
+        tk = (await c.get(f"/api/uxflow/{sid}/export/tokens.json")).json()
+        assert tk["color"]["primary"] and tk["font"]["heading"], tk
+        assert "navigation map" in (await c.get(f"/api/uxflow/{sid}/navmap.html")).text
         mx = await c.get(f"/api/uiux/{sid}/export/mockups.html")
-        assert mx.status_code == 200 and "RelayReel_UI_UX_Mockups_v1.0.html" in mx.headers["content-disposition"]
+        assert mx.status_code == 200 and "RelayReel_UI_UX_Mockups_v1.1.html" in mx.headers["content-disposition"]
         # --- product folders: every baseline filed, handover zip mirrors the workspace layout
         fl = (await c.get(f"/api/handover/{sid}/files")).json()
         want = {"RelayReel/Requirement/RelayReel_BRD_PRD_v1.0.docx", "RelayReel/Requirement/RelayReel_BRD_PRD_v1.1.docx",
                 "RelayReel/Technical/RelayReel_TechDesign_v1.0.docx", "RelayReel/Technical/RelayReel_Technical_Stack_Charter_v1.0.md",
-                "RelayReel/UI-UX/RelayReel_UI_UX_Mockups_v1.0.html", "RelayReel/UI-UX/RelayReel_Prototype_v1.0.html"}
+                "RelayReel/UI-UX/RelayReel_UI_UX_Mockups_v1.0.html", "RelayReel/UI-UX/RelayReel_Prototype_v1.1.html",
+                "RelayReel/UI-UX/RelayReel_UX_Flow_Spec_v1.0.docx", "RelayReel/UI-UX/RelayReel_Design_Tokens_v1.0.json"}
         assert want <= set(fl["files"]), fl
         assert any(f.startswith("RelayReel/UI-UX/designs/") for f in fl["files"]), fl
         zp = await c.get(f"/api/handover/{sid}/pack.zip")

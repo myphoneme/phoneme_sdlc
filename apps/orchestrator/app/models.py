@@ -228,6 +228,10 @@ class SessionState(BaseModel):
     # Stage 9 -- UI/UX screens in the product's brand
     ui_modules: list["UIModule"] = []
     ui_generation: GenerationProgress = GenerationProgress()
+    # Stage 10 -- UX Flow & Design Specification (2026-10-10): the frozen
+    # user journeys over the UI/UX screens; closes the documentation stage.
+    ux_flows: list["UXFlow"] = []
+    ux_generation: GenerationProgress = GenerationProgress()
     # discovery -> confirm -> research -> identity -> freeze -> flow -> generating -> manager
     stage: str = "discovery"
 
@@ -574,6 +578,62 @@ class UIModule(BaseModel):
     decisions: list[Decision] = []
 
 
+class FlowStep(BaseModel):
+    """One step of a user journey: who does what on which screen, what the
+    product does in response, and how QA proves it (Given/When/Then)."""
+    step_id: str = ""        # RELA-FL-002.J1.3
+    actor: str = "User"
+    action: str = ""
+    screen: str = ""         # exact screen name from the UI/UX stage
+    response: str = ""       # what the product does / shows
+    background: str = ""     # work that continues out of sight (e.g. "analysing on the server")
+    api: str = ""            # "METHOD /path" from the Technical Design, if the step calls one
+    criteria: list[str] = []  # Given ... when ... then ...
+
+
+class Journey(BaseModel):
+    journey_id: str = ""     # J1
+    title: str = ""
+    persona: str = ""
+    trigger: str = ""
+    outcome: str = ""        # the success state the journey ends in
+    entry_from: str = ""     # previous module / outside the product
+    exits_to: str = ""       # next module, if the journey hands over
+    steps: list[FlowStep] = []
+
+
+class ScreenStates(BaseModel):
+    """What the user sees in each state of a screen ("n/a" when it cannot happen)."""
+    screen: str
+    empty: str = ""
+    loading: str = ""
+    error: str = ""
+    offline: str = ""
+
+
+class FlowDoc(BaseModel):
+    journeys: list[Journey] = []
+    screen_states: list[ScreenStates] = []
+    microcopy: list[str] = []   # "Screen · element: exact text"
+    notes: list[str] = []
+    open_questions: list[str] = []
+
+
+class UXFlow(BaseModel):
+    fl_id: str               # RELA-FL-002 (traces RELA-002 -> RELA-TD-002 -> RELA-UI-002)
+    module: str
+    req_id: str = ""
+    ui_id: str = ""
+    title: str = ""
+    kind: str = "flow"
+    status: str = "Draft"
+    doc: Optional[FlowDoc] = None
+    revised_doc: Optional[FlowDoc] = None
+    status_before_revision: Optional[str] = None
+    thread: list[ReviewMessage] = []
+    decisions: list[Decision] = []
+
+
 class ItemCommentRequest(BaseModel):
     item_id: str
     comment: str
@@ -607,7 +667,7 @@ class StackSaveRequest(BaseModel):
 
 class Baseline(BaseModel):
     """A frozen, versioned set of documents for one SDLC stage."""
-    doc_type: str = "brdprd"  # brdprd | techdesign | uiux
+    doc_type: str = "brdprd"  # brdprd | techdesign | uiux | uxflow
     version: str
     at: str
     description: str = ""

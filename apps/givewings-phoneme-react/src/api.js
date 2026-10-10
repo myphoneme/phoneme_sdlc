@@ -41,6 +41,7 @@ export const fileUrl = (path) => `${BASE}${path}`;
 export const api = {
   techdesign: stageApi("techdesign"),
   uiux: stageApi("uiux"),
+  uxflow: { ...stageApi("uxflow"), gates: (sid) => get(`/uxflow/${sid}/gates`) },
   suggestStack: (sid) => post(`/techdesign/${sid}/stack/suggest`, {}),
   saveStack: (sid, stack) => post(`/techdesign/${sid}/stack`, { stack }),
   confirmStack: (sid) => post(`/techdesign/${sid}/stack/confirm`, {}),

@@ -780,3 +780,29 @@ button.journey-link:hover { background: #faf6f2; }
 .bp-summary dt { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #8a6a52; }
 .bp-summary dd { margin: 2px 0 0; font-size: 13.5px; text-transform: none; }
 @media (max-width: 1100px) { .bp-work { grid-template-columns: 1fr; } .bp-preview { position: static; } }
+
+/* Stage 10 — UX Flow freeze gates and journey tables (2026-10-10) */
+.gates-panel { margin: 0 0 16px; padding: 16px; border: 1px solid #ffd2ad; border-radius: 14px; background: #fffaf5; }
+.gates-panel.done { border-color: #b6e0c6; background: #f1faf4; }
+.gates-head { display: flex; gap: 12px; align-items: flex-start; }
+.gates-head > svg { flex: none; margin-top: 2px; color: #d34817; }
+.gates-panel.done .gates-head > svg { color: #187e4e; }
+.gates-head > div { flex: 1; }
+.gates-head p { margin: 4px 0 0; color: #5b5b5b; font-size: 14px; }
+.gates-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.gates-list > li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: #fff; border: 1px solid #ececec; }
+.gates-list > li > svg { flex: none; margin-top: 2px; }
+.gates-list > li.ok > svg { color: #187e4e; }
+.gates-list > li.open { border-color: #f5c2bd; }
+.gates-list > li.open > svg { color: #c4320a; }
+.gates-list > li.warn > svg { color: #b7791f; }
+.gates-list ul { margin: 6px 0 0; padding-left: 18px; color: #555; font-size: 13px; }
+.gates-list .chip { margin-left: 8px; }
+.flow-doc { display: grid; gap: 18px; }
+.flow-doc h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 15px; }
+.flow-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.flow-table th, .flow-table td { border: 1px solid #e6e6e6; padding: 6px 8px; text-align: left; vertical-align: top; }
+.flow-table th { background: #f7f7f7; font-weight: 600; }
+.flow-table td.mono { font-family: ui-monospace, monospace; white-space: nowrap; }
+.flow-table code { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 6px; background: #f2f2f2; font-size: 12px; }
+@media (max-width: 720px) { .flow-table { display: block; overflow-x: auto; } }

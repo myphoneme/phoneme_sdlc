@@ -2,7 +2,7 @@
 // filed the way Phoneme organises product workspaces
 // (<Product>/Requirement, /Technical, /UI-UX), every version kept.
 import { useEffect, useState } from "react";
-import { Download, FileText, Folder, FolderArchive, LayoutTemplate, Network, PartyPopper } from "lucide-react";
+import { Download, FileText, Folder, FolderArchive, LayoutTemplate, Network, PartyPopper, Route } from "lucide-react";
 import { api, fileUrl } from "../api.js";
 import { StackSummary } from "./TechDesignStage.jsx";
 
@@ -37,6 +37,7 @@ export default function HandoverPack({ session }) {
     { t: "brdprd", icon: FileText, name: "BRD/PRD", what: "What to build — business rules and acceptance criteria", href: fileUrl(`/brdprd/${sid}/export/brdprd.docx`), file: "Word (.docx)" },
     { t: "techdesign", icon: Network, name: "Technical Design (HLD/LLD)", what: "How to build it — architecture, data model, APIs", href: fileUrl(`/techdesign/${sid}/export/techdesign.docx`), file: "Word (.docx)" },
     { t: "uiux", icon: LayoutTemplate, name: "UI/UX mockups & prototype", what: "What it looks like — every screen in the brand, clickable", href: fileUrl(`/uiux/${sid}/export/mockups.html`), file: "HTML" },
+    { t: "uxflow", icon: Route, name: "UX Flow & Design Specification", what: "How people use it — journeys, screen states, navigation map, design tokens", href: fileUrl(`/uxflow/${sid}/export/uxs.docx`), file: "Word (.docx)" },
   ];
   return (
     <div className="review">
@@ -44,7 +45,7 @@ export default function HandoverPack({ session }) {
         <PartyPopper size={22} aria-hidden="true" />
         <div>
           <strong>{session.selected_name} is ready to build</strong>
-          <p>All three SDLC documents are baselined in Phoneme's corporate format and traceable to each other{trace}. Hand this pack to the build team; any later change goes through unfreeze → re-baseline, so every version stays on record.</p>
+          <p>Every SDLC document is baselined in Phoneme's corporate format and traceable to each other{trace}. Hand this pack to the build team; any later change goes through unfreeze → re-baseline, so every version stays on record.</p>
         </div>
       </div>
       <section className="pack-panel">

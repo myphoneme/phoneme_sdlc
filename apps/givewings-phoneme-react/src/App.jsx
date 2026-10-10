@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Eye } from 'lucide-react';
-import { Network, LayoutTemplate, PackageCheck } from 'lucide-react';
+import { Network, LayoutTemplate, PackageCheck, Route } from 'lucide-react';
 import { ArrowRight, ArrowUpRight, Bell, Check, ChevronDown, ChevronRight, CircleHelp, Command, FileText, Layers3, Lightbulb, Menu, MessageCircle, MoreHorizontal, Plus, Rocket, Search, Sparkles, UsersRound, WandSparkles, X, Zap, BarChart3, ClipboardCheck, Target, PenLine } from 'lucide-react';
 import DiscoveryChat from './stages/DiscoveryChat.jsx';
 import ResearchCard from './stages/ResearchCard.jsx';
@@ -13,6 +13,7 @@ import ModuleFlowReview from './stages/ModuleFlowReview.jsx';
 import BrdPrdManager from './stages/BrdPrdManager.jsx';
 import TechDesignStage from './stages/TechDesignStage.jsx';
 import UIUXStage from './stages/UIUXStage.jsx';
+import UXFlowStage from './stages/UXFlowStage.jsx';
 import HandoverPack from './stages/HandoverPack.jsx';
 import { api } from './api.js';
 
@@ -20,8 +21,8 @@ import { api } from './api.js';
 // SessionState.stage) -- NOT the mockup's invented 4-stage
 // ['Idea','Plan','Build','Launch'] taxonomy. Every place that used to render
 // 4 stages now adapts to these 7.
-const STAGES = ['discovery', 'research', 'identity', 'freeze', 'flow', 'generating', 'manager', 'techdesign', 'uiux', 'complete'];
-const STAGE_LABELS = ['Discovery Chat', 'Research', 'Identity', 'Freeze Scope', 'Flow Design', 'Drafting BRD/PRD', 'BRD/PRD Manager', 'Technical Design', 'UI/UX Design', 'Ready to Build'];
+const STAGES = ['discovery', 'research', 'identity', 'freeze', 'flow', 'generating', 'manager', 'techdesign', 'uiux', 'uxflow', 'complete'];
+const STAGE_LABELS = ['Discovery Chat', 'Research', 'Identity', 'Freeze Scope', 'Flow Design', 'Drafting BRD/PRD', 'BRD/PRD Manager', 'Technical Design', 'UI/UX Design', 'UX Flow Freeze', 'Ready to Build'];
 // 'confirm' (reviewing the concept brief) is the tail of Discovery on the journey.
 const journeyStage = stage => (stage === 'confirm' ? 'discovery' : stage);
 
@@ -53,6 +54,7 @@ const STAGE_META = {
   manager: { icon: FileText, title: 'BRD/PRD Manager', short: 'Review, revise, freeze', desc: 'Review each drafted requirement. Answer open questions, comment to request a revision, approve and freeze — then baseline the BRD/PRD to move on.' },
   techdesign: { icon: Network, title: 'Technical Design', short: 'Stack, HLD & LLD', desc: 'Confirm the technology stack, then review the architecture (HLD) and a low-level design per module — data model, APIs and sequences — traced 1:1 to the BRD/PRD.' },
   uiux: { icon: LayoutTemplate, title: 'UI/UX Design', short: 'Screens in your brand', desc: 'Every screen for every module, drawn in the identity you chose. Comment to rework, answer open questions, approve and freeze.' },
+  uxflow: { icon: Route, title: 'UX Flow Freeze', short: 'Journeys, states & gates', desc: 'Freeze how people move through the screens: every journey from trigger to success, each screen\'s empty, loading, error and offline states, and the navigation map. Automatic gates check nothing is missing before the documentation baseline.' },
   complete: { icon: PackageCheck, title: 'Ready to Build', short: 'Handover pack', desc: 'All documents are baselined. Download the handover pack for the build team.' },
 };
 
@@ -127,7 +129,7 @@ function statusFor(rawStage) {
   const stage = journeyStage(rawStage);
   if (stage === 'discovery') return { label: 'Early stage', cls: 'early-stage' };
   if (stage === 'complete') return { label: 'Ready to build', cls: '' };
-  if (stage === 'techdesign' || stage === 'uiux') return { label: 'In design', cls: 'in-progress' };
+  if (stage === 'techdesign' || stage === 'uiux' || stage === 'uxflow') return { label: 'In design', cls: 'in-progress' };
   if (stage === 'generating' || stage === 'manager') return { label: 'Ready for BRD/PRD', cls: '' };
   return { label: 'In progress', cls: 'in-progress' };
 }
@@ -435,7 +437,7 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
           {reviewing && (
             <div className="review-banner" role="status">
               <Eye size={16} aria-hidden="true" />
-              <span>{['manager', 'techdesign', 'uiux'].includes(viewStage) ? 'You are looking back at a baselined stage — unfreeze a document to change it, then re-baseline.' : 'You are looking back at a completed step — read-only.'}</span>
+              <span>{['manager', 'techdesign', 'uiux', 'uxflow'].includes(viewStage) ? 'You are looking back at a baselined stage — unfreeze a document to change it, then re-baseline.' : 'You are looking back at a completed step — read-only.'}</span>
               <button type="button" className="btn-primary" onClick={() => setViewIndex(stageIndex)}>
                 Back to {STAGE_META[jStage].title} <ArrowRight size={15} />
               </button>
@@ -468,6 +470,7 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
                 )}
                 {stage === 'techdesign' && <TechDesignStage session={session} setSession={setSession} />}
                 {stage === 'uiux' && <UIUXStage session={session} setSession={setSession} />}
+                {stage === 'uxflow' && <UXFlowStage session={session} setSession={setSession} />}
                 {stage === 'complete' && <HandoverPack session={session} />}
               </>
             )}

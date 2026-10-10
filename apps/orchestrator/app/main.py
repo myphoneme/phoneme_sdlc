@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config, documents, store
-from .routers import discovery, identity, wizard, brdprd, techdesign, uiux
+from .routers import discovery, identity, wizard, brdprd, techdesign, uiux, uxflow
 
 logging.basicConfig(level=logging.INFO)
 
@@ -45,6 +45,7 @@ app.include_router(wizard.router)
 app.include_router(brdprd.router)
 app.include_router(techdesign.router)
 app.include_router(uiux.router)
+app.include_router(uxflow.router)
 app.include_router(documents.router)
 
 

@@ -9,6 +9,8 @@ product workspaces (see the HR Management / Teamora folders):
     <Product>/Technical/<Product>_Technical_Stack_Charter_v1.0.md
     <Product>/UI-UX/<Product>_UI_UX_Mockups_v1.0.html
     <Product>/UI-UX/<Product>_Prototype_v1.0.html
+    <Product>/UI-UX/<Product>_UX_Flow_Spec_v1.0.docx
+    <Product>/UI-UX/<Product>_Design_Tokens_v1.0.json
     <Product>/UI-UX/designs/<module>/<uploaded file>
 
 Each baseline writes its version into DOCS_DIR/<session>/..., so earlier
@@ -39,7 +41,7 @@ def _ver(state, doc_type):
     return b[-1] if b else "draft"
 
 
-async def render(state, doc_types=("brdprd", "techdesign", "uiux")) -> list[tuple[str, bytes]]:
+async def render(state, doc_types=("brdprd", "techdesign", "uiux", "uxflow")) -> list[tuple[str, bytes]]:
     """Latest version of every document of the given stages, as (relpath, bytes)."""
     from .routers import uiux  # late import: routers depend on this module's siblings
     out: list[tuple[str, bytes]] = []
@@ -66,6 +68,13 @@ async def render(state, doc_types=("brdprd", "techdesign", "uiux")) -> list[tupl
                         mod = re.sub(r"[^A-Za-z0-9]+", "_", m.module).strip("_")
                         nm = re.sub(r"[^A-Za-z0-9]+", "_", sc.name).strip("_") or sc.asset_id
                         out.append((f"{export.product_slug(state)}/UI-UX/designs/{mod}/{nm}{p.suffix}", p.read_bytes()))
+    if "uxflow" in doc_types and any(f.doc for f in state.ux_flows):
+        from . import uxflow as uxf
+        from .routers import uxflow
+        v = _ver(state, "uxflow")
+        data, _ = uxflow.uxflow_docx(state, reqs)
+        out.append((export.relative_path(state, "uxflow", v), data))
+        out.append((export.relative_path(state, "tokens", v), uxf.tokens_json(state)))
     return out
 
 

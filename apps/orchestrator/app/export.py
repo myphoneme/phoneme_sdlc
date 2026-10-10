@@ -49,7 +49,7 @@ CONFIDENTIALITY = (
 )
 
 # Folder layout per document type (matches the existing Phoneme workspaces).
-FOLDERS = {"brdprd": "Requirement", "techdesign": "Technical", "uiux": "UI-UX"}
+FOLDERS = {"brdprd": "Requirement", "techdesign": "Technical", "uiux": "UI-UX", "uxflow": "UI-UX", "tokens": "UI-UX"}
 
 
 def product_code(state) -> str:
@@ -70,8 +70,9 @@ def project_code(state) -> str:
 def file_name(state, doc_type: str, version: str) -> str:
     v = version if version and version[0].isdigit() else "draft"
     stem = {"brdprd": "BRD_PRD", "techdesign": "TechDesign", "uiux": "UI_UX_Mockups",
-            "prototype": "Prototype", "stack": "Technical_Stack_Charter"}[doc_type]
-    ext = {"uiux": "html", "prototype": "html", "stack": "md"}.get(doc_type, "docx")
+            "prototype": "Prototype", "stack": "Technical_Stack_Charter",
+            "uxflow": "UX_Flow_Spec", "tokens": "Design_Tokens"}[doc_type]
+    ext = {"uiux": "html", "prototype": "html", "stack": "md", "tokens": "json"}.get(doc_type, "docx")
     return f"{product_slug(state)}_{stem}_v{v}.{ext}"
 
 

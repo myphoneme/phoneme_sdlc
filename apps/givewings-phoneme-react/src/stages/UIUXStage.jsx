@@ -138,7 +138,7 @@ export default function UIUXStage({ session, setSession }) {
         </>
       )}
       {error && <div className="error-banner" role="alert">{error}</div>}
-      <BaselinePanel label="UI/UX" nextLabel="the build handover" refreshKey={items.map((i) => i.status).join()}
+      <BaselinePanel label="UI/UX" nextLabel="the UX flow freeze" refreshKey={items.map((i) => i.status).join()}
         fetchStatus={() => api.uiux.baseline(sid)} onBaseline={async () => setSession(await api.uiux.createBaseline(sid))}
         downloads={[{ label: "Mockups (.html)", href: fileUrl(`/uiux/${sid}/export/mockups.html`) }]} />
       <PrototypePanel sid={sid} session={session} />

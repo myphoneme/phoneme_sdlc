@@ -58,6 +58,7 @@ class Kind:
     ready: Callable[[SessionState], Optional[str]] = lambda s: None  # error if not ready
     merge: Callable[[Any, Any], Any] = lambda old, new: new  # keep user content (e.g. uploads) when a draft lands
     on_baseline: Optional[Callable[[SessionState], Awaitable[Any]]] = None  # file the documents
+    gate: Optional[Callable[[SessionState], Optional[str]]] = None  # extra check before a baseline (error text)
 
 
 def items(kind: Kind, state: SessionState) -> list:
@@ -315,6 +316,10 @@ def make_router(kind: Kind) -> APIRouter:
             st = baseline_status(kind, state)
             if not st["all_frozen"]:
                 raise HTTPException(409, f"freeze every {kind.label} document before baselining")
+            if kind.gate:
+                err = kind.gate(state)
+                if err:
+                    raise HTTPException(409, err)
             if st["version"] and not st["changed_since"]:
                 return state
             its = items(kind, state)

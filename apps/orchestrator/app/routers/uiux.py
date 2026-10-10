@@ -187,7 +187,7 @@ def ready(state: SessionState) -> str | None:
 
 KIND = review.Kind(
     doc_type="uiux", label="UI/UX", list_attr="ui_modules", id_attr="ui_id", gen_attr="ui_generation",
-    stage="uiux", next_stage="complete", plan=plan, draft=draft,
+    stage="uiux", next_stage="uxflow", plan=plan, draft=draft,
     record_deferred=lambda doc, t: doc.notes.append(f"Deferred to a later release: {t}"), ready=ready,
     merge=merge,
     on_baseline=lambda state: __import__("app.documents", fromlist=["archive"]).archive(state, "uiux"),
