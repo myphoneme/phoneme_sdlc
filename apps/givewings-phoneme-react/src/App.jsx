@@ -58,6 +58,34 @@ const STAGE_META = {
   complete: { icon: PackageCheck, title: 'Ready to Build', short: 'Handover pack', desc: 'All documents are baselined. Download the handover pack for the build team.' },
 };
 
+const LIFECYCLE_CHAPTERS = [
+  {
+    title: 'Concept note',
+    stages: ['discovery', 'research', 'identity'],
+    icon: Lightbulb,
+    gate: 'Concept, research and brand decisions captured',
+  },
+  {
+    title: 'Requirements',
+    stages: ['freeze', 'flow', 'generating', 'manager'],
+    icon: ClipboardCheck,
+    gate: 'Scope, flows and BRD/PRD baselined',
+  },
+  {
+    title: 'Design pack',
+    stages: ['techdesign', 'uiux', 'uxflow', 'complete'],
+    icon: LayoutTemplate,
+    gate: 'Technical, UI/UX and UX flow docs frozen',
+  },
+  {
+    title: 'Build, test, launch',
+    stages: [],
+    icon: Rocket,
+    gate: 'Next chapter: code plan, PR, QA, release, production',
+    future: true,
+  },
+];
+
 function IconBox({ icon: Icon, tone = 'orange' }) { return <span className={`icon-box ${tone}`}><Icon size={22} strokeWidth={2} /></span>; }
 
 // Shared top navigation — the SAME bar on the dashboard and every wizard
@@ -167,6 +195,41 @@ function ProductCard({ session, onOpen }) {
   );
 }
 
+function LifecycleCockpit({ sessions, onCreate }) {
+  const countIn = (stages) => sessions.filter((s) => stages.includes(journeyStage(s.stage))).length;
+  const relay = sessions.find((s) => /relay\s*reel|relayreel/i.test(s.name || s.selected_name || ''));
+  return (
+    <section className="lifecycle-cockpit" aria-label="GiveWings lifecycle cockpit">
+      <div className="lifecycle-copy">
+        <span className="eyebrow">CONCEPT NOTE TO COMMERCIAL LAUNCH</span>
+        <h1>One governed path from idea to product.</h1>
+        <p>Frozen early stages stay intact; GiveWings now frames them as the documentation chapter of the full SDLC: requirements, design, build, test, release and change.</p>
+        <div className="pilot-strip">
+          <span>Reference pilot</span>
+          <strong>{relay?.name || 'RelayREEL'}</strong>
+          <small>{relay ? `${STAGE_META[journeyStage(relay.stage)]?.title || relay.stage} is in progress` : 'Use this flow to prove the full cycle'}</small>
+        </div>
+      </div>
+      <div className="lifecycle-flow">
+        {LIFECYCLE_CHAPTERS.map(({ title, stages, icon: Icon, gate, future }) => {
+          const count = future ? 0 : countIn(stages);
+          return (
+            <article key={title} className={`lifecycle-card${future ? ' future' : ''}`}>
+              <span className="lifecycle-icon"><Icon size={18} /></span>
+              <div>
+                <strong>{title}</strong>
+                <p>{gate}</p>
+              </div>
+              <span className="lifecycle-count">{future ? 'Planned' : `${count} product${count === 1 ? '' : 's'}`}</span>
+            </article>
+          );
+        })}
+      </div>
+      <button className="lifecycle-cta" onClick={onCreate}>New product <ArrowRight size={16} /></button>
+    </section>
+  );
+}
+
 function Dashboard({ sessions, loading, error, onOpen, onCreate, onRetry }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('All');
@@ -213,6 +276,7 @@ function Dashboard({ sessions, loading, error, onOpen, onCreate, onRetry }) {
       <TopBar active="Home" query={query} onQuery={setQuery} />
 
       <main id="home" className="dashboard">
+        <LifecycleCockpit sessions={sessions} onCreate={() => setModal('new')} />
         <div className="intro-grid">
           <section className="welcome">
             <div className="eyebrow">YOUR PRODUCT WORKSPACE</div>
