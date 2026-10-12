@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Download, ExternalLink, ImageUp, MousePointerClick, Pencil, Play, Save, Sparkles, Trash2, X } from "lucide-react";
 import { api, fileUrl } from "../api.js";
 import { GenerationBoard } from "./Generating.jsx";
+import DesignMatch from "./DesignMatch.jsx";
 import { BaselinePanel, ReviewCard, useStageDrafting } from "./ReviewKit.jsx";
 
 const protoUrl = (sid, key) => fileUrl(`/uiux/${sid}/prototype`) + (key ? `#${key}` : "");
@@ -141,6 +142,7 @@ export default function UIUXStage({ session, setSession }) {
       <BaselinePanel label="UI/UX" nextLabel="the UX flow freeze" refreshKey={items.map((i) => i.status).join()}
         fetchStatus={() => api.uiux.baseline(sid)} onBaseline={async () => setSession(await api.uiux.createBaseline(sid))}
         downloads={[{ label: "Mockups (.html)", href: fileUrl(`/uiux/${sid}/export/mockups.html`) }]} />
+      <DesignMatch session={session} setSession={setSession} />
       <PrototypePanel sid={sid} session={session} />
       {items.length > 0 && <p className="muted small">{screens} screens across {items.length} modules{uploads ? ` (${uploads} uploaded by you)` : ""}, in {session.selected_name}'s colours. Comment on a module to rework its screens, or upload your own designs.</p>}
       <div className="requirement-feed">

@@ -840,3 +840,15 @@ button.journey-link:hover { background: #faf6f2; }
 .di-card small { color: #666; font-size: 12px; }
 .di-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
 .di-slot-body .chip { justify-self: start; }
+.di-consent { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid #f3c27a; background: #fffaf0; border-radius: 12px; }
+.di-consent.ok { border-color: #bfe3cc; background: #f1faf4; }
+.di-consent > div { flex: 1; min-width: 0; }
+.di-consent p { margin: 2px 0 0; font-size: 13px; color: #555; }
+.dm .di-card select { max-width: 100%; font-size: 12.5px; }
+.di-mods { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.di-mod { display: grid; gap: 6px; align-content: start; padding: 10px; border: 1px solid #e6e6e6; border-radius: 12px; background: #fff; }
+.di-mod.decide { border-color: #f3c27a; background: #fffaf0; }
+.di-mod.generate { border-style: dashed; }
+.di-mod .chip { justify-self: start; }
+.di-mod-thumbs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.dm .notice-inline { background: #fffaf0; border: 1px solid #f3c27a; color: #8a4b00; padding: 8px 12px; border-radius: 10px; }

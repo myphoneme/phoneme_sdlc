@@ -107,6 +107,20 @@ export default function DesignImport({ session, setSession, frozen }) {
             </div>
           )}
 
+          {slots.length - filled > 0 && (hint?.generate_ok ? (
+            <div className="di-consent ok"><CheckCircle2 size={18} aria-hidden="true" />
+              <div><strong>OK — the {slots.length - filled} empty places are generated in your style</strong>
+                <p>You can still upload any of them above, or pick one of your designs in its card.</p></div>
+              {!frozen && <button className="btn-secondary sm" disabled={!!busy} onClick={() => run("Saving…", () => api.designConsent(sid, false))}>Change my mind</button>}
+            </div>
+          ) : (
+            <div className="di-consent"><Wand2 size={18} aria-hidden="true" />
+              <div><strong>{slots.length - filled} place{slots.length - filled > 1 ? "s" : ""} in the frame have no design yet</strong>
+                <p>Upload them above, or let GiveWings generate them in the look of your designs. You can't freeze the blueprint until you choose.</p></div>
+              {!frozen && <button className="btn-primary sm" disabled={!!busy} onClick={() => run("Saving…", () => api.designConsent(sid, true))}><Wand2 size={14} /> Generate them in my style</button>}
+            </div>
+          ))}
+
           <h4 className="mini-head">Your frame</h4>
           <div className="di-slots">
             {slots.map((s) => {

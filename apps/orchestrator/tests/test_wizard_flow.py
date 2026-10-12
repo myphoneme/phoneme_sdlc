@@ -59,6 +59,10 @@ async def fake(feature, prompt, system=None):
                                                   "entry_from": "outside the product", "exits_to": "", "steps": steps}, {"title": "empty", "steps": "bad"}],
                                     "screen_states": [{"screen": n, "empty": "Nothing saved yet — share a link", "loading": "Analysing…", "error": "Couldn't load — retry", "offline": "n/a"} for n in names],
                                     "microcopy": ["Vault inbox · empty state: Nothing saved yet"], "notes": ["Journeys stay inside the module"], "open_questions": []})}
+    if f == ai_router.Feature.TECH_DESIGN_GENERATION and "Match each screen" in prompt:
+        import re as _re
+        return {"text": json.dumps({"matches": [{"design_id": i, "module": ("Repurpose Studio" if k == "list" else ""), "confidence": 0.9}
+                                                  for i, k in _re.findall(r"- ([0-9a-f]{12}) \(phone, (\w+)", prompt)]})}
     if f == ai_router.Feature.TECH_DESIGN_GENERATION and "Design the screens" in prompt:
         return {"text": json.dumps({"screens": [{"name": "Vault inbox", "purpose": "See captured items", "route": "/inbox", "layout": "app",
             "blocks": [{"type": "stats", "items": ["Items this week: 42"]}, {"type": "list", "title": "Latest", "items": ["AI chips article — Article"]},
@@ -223,7 +227,10 @@ async def run():
         s = await post("/api/identity/blueprint", {"session_id": sid, "blueprint": bp}); bp = s["brand"]["blueprint"]
         pv = await c.get(f"/api/identity/{sid}/blueprint/preview")
         assert pv.status_code == 200 and 'class="tabbar"' in pv.text and "/designs/file/" in pv.text and "Share to RelayReel" in pv.text, pv.text[:200]
+        gerr = await post("/api/identity/blueprint/freeze", {"session_id": sid}, 409)   # places without a design: upload or agree to generate
+        s = await post("/api/identity/designs/consent", {"session_id": sid, "ok": True}); assert s["brand"]["blueprint"]["design_hints"]["generate_ok"]
         s = await post("/api/identity/blueprint/freeze", {"session_id": sid}); assert s["brand"]["blueprint"]["version"] == "1.0"
+        await post("/api/identity/designs/consent", {"session_id": sid, "ok": False}, 409)   # frozen
         await post("/api/identity/blueprint", {"session_id": sid, "blueprint": bp}, 409)
         assert (await c.post(f"/api/identity/{sid}/designs", files=design_files())).status_code == 409   # frozen
         s = await post("/api/identity/blueprint/unfreeze", {"session_id": sid})
@@ -448,7 +455,9 @@ async def run():
         # --- clickable prototype + uploaded designs
         import os, tempfile
         from app import config as _cfg
+        _old_up = _cfg.UPLOAD_DIR
         _cfg.UPLOAD_DIR = __import__("pathlib").Path(tempfile.mkdtemp())
+        import shutil; shutil.copytree(_old_up / sid / "designs", _cfg.UPLOAD_DIR / sid / "designs")   # the designs uploaded at Identity
         PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
         up = await c.post(f"/api/uiux/{sid}/upload/RELA-UI-002", files=[("files", ("vault_setup_screen.png", PNG, "image/png"))], data={"mode": "add"})
         assert up.status_code == 200, up.text
@@ -474,6 +483,33 @@ async def run():
         # only screen left can't be removed
         one = next(u for u in s["ui_modules"] if u["ui_id"] == "RELA-UI-003")
         await post(f"/api/uiux/{sid}/screens/remove", {"item_id": "RELA-UI-003", "screen_id": one["doc"]["screens"][0]["screen_id"]}, 400)
+        # --- Step 2/3: the owner's screens are matched to modules; modules with no design need a decision
+        s = (await c.get(f"/api/discovery/{sid}")).json(); dsg = s["brand"]["blueprint"]["designs"]
+        lst = next(d for d in dsg if d["kind"] == "list"); hom = next(d for d in dsg if d["kind"] == "home")
+        await post("/api/identity/blueprint/unfreeze", {"session_id": sid})
+        for d in (lst, hom):
+            await post("/api/identity/designs/update", {"session_id": sid, "design_id": d["design_id"], "slot": "", "status": "business"})
+        await post("/api/identity/blueprint/freeze", {"session_id": sid})
+        b = (await c.get(f"/api/uiux/{sid}/designs")).json()
+        st3 = {m["module"]: m["state"] for m in b["modules"]}
+        assert b["active"] and "not matched" in b["blocked"] and st3["Repurpose Studio"] == "decide" and st3["Capture & Catalogue"] == "yours", b
+        assert len(b["modules"]) == 2, b   # the account module follows the frame
+        s = await post("/api/uiux/designs/consent", {"session_id": sid, "ui_id": "RELA-UI-003", "ok": True})
+        assert next(m for m in (await c.get(f"/api/uiux/{sid}/designs")).json()["modules"] if m["module"] == "Repurpose Studio")["state"] == "generate"
+        await post("/api/uiux/designs/consent", {"session_id": sid, "ui_id": "RELA-UI-003", "ok": False})
+        await post("/api/uiux/designs/match", {"session_id": sid})
+        dm = {d["design_id"]: d for d in (await c.get(f"/api/discovery/{sid}")).json()["brand"]["blueprint"]["designs"]}
+        assert dm[lst["design_id"]]["module"] == "Repurpose Studio" and dm[hom["design_id"]]["module"] == "" , dm
+        b = (await c.get(f"/api/uiux/{sid}/designs")).json(); assert b["loose"] == [hom["design_id"]] and "not matched" in b["blocked"], b
+        await post("/api/uiux/designs/assign", {"session_id": sid, "design_id": hom["design_id"], "module": "Nowhere"}, 400)
+        await post("/api/uiux/designs/assign", {"session_id": sid, "design_id": hom["design_id"], "module": "Capture & Catalogue"})
+        b = (await c.get(f"/api/uiux/{sid}/designs")).json(); assert not b["loose"] and b["pending_apply"] == 2 and "Add your matched" in b["blocked"], b
+        s = await post("/api/uiux/designs/apply", {"session_id": sid})
+        b = (await c.get(f"/api/uiux/{sid}/designs")).json(); assert b["blocked"] is None and b["pending_apply"] == 0, b
+        m3 = next(u for u in s["ui_modules"] if u["ui_id"] == "RELA-UI-003")
+        up3 = next(x for x in m3["doc"]["screens"] if x["source"] == "upload"); assert up3["name"] == "Library" and up3["blocks"][0]["note"] == "phone", up3
+        f = await c.get(f"/api/uiux/{sid}/file/{up3['asset_id']}"); assert f.status_code == 200 and f.headers["content-type"] == "image/png"
+        await post("/api/uiux/designs/apply", {"session_id": sid})   # nothing left to add: harmless
         s = (await c.get(f"/api/discovery/{sid}")).json(); uis = s["ui_modules"]
         for u in uis:
             await post(f"/api/uiux/{sid}/accept", {"item_id": u["ui_id"]})

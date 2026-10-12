@@ -16,9 +16,9 @@ from pathlib import Path
 from fastapi import File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
-from .. import ai_router, config, export, reqdoc, review, site_kit, store, ui_render
+from .. import ai_router, config, design_import, export, reqdoc, review, site_kit, store, ui_render
 from ..locks import session_lock
-from ..models import ScreenEditRequest, ScreenMoveRequest, SessionState, UIBlock, UIDoc, UIModule, UIScreen
+from ..models import DesignAssignRequest, DesignConsentRequest, ScreenEditRequest, ScreenMoveRequest, SessionState, UIBlock, UIDoc, UIModule, UIScreen
 
 BLOCK_TYPES = {"header", "text", "list", "cards", "form", "buttons", "table", "tabs", "stats", "notice", "steps", "media",
                "hero", "promise", "features", "pricing", "faq", "cta"}
@@ -121,7 +121,8 @@ def _blueprint_rule(state: SessionState) -> str:
     else:
         lay = 'Signed-in screens use layout "app" (the web app frame).'
     return ("Experience Blueprint (frozen at Identity -- design inside it, never change navigation, sign-in or the public site):\n"
-            + blueprint.summary_text(bp) + "\n" + lay + "\n\n")
+            + blueprint.summary_text(bp) + "\n" + lay + "\n"
+            + (design_import.style_text(state) + "\n" if design_import.style_text(state) else "") + "\n")
 
 
 async def draft(state: SessionState, item: UIModule, instruction: str | None) -> UIDoc:
@@ -189,7 +190,7 @@ KIND = review.Kind(
     doc_type="uiux", label="UI/UX", list_attr="ui_modules", id_attr="ui_id", gen_attr="ui_generation",
     stage="uiux", next_stage="uxflow", plan=plan, draft=draft,
     record_deferred=lambda doc, t: doc.notes.append(f"Deferred to a later release: {t}"), ready=ready,
-    merge=merge,
+    merge=merge, gate=design_import.module_gate,
     on_baseline=lambda state: __import__("app.documents", fromlist=["archive"]).archive(state, "uiux"),
 )
 router = review.make_router(KIND)
@@ -341,6 +342,10 @@ async def remove_screen(session_id: str, req: ScreenEditRequest):
     if len(item.doc.screens) == 1:
         raise HTTPException(400, "a module needs at least one screen — upload or rework before removing the last one")
     item.doc.screens.remove(sc)
+    bp = state.brand.blueprint if state.brand else None
+    for a in (bp.designs if bp else []):
+        if a.applied == sc.screen_id:
+            a.applied = ""  # the design is free to be matched again
     if sc.source == "upload":
         try:
             _asset_path(session_id, sc).unlink(missing_ok=True)
@@ -410,3 +415,93 @@ async def export_mockups(session_id: str):
         raise HTTPException(400, "no screens to export yet")
     name = export.file_name(state, "uiux", _uiux_version(state))
     return HTMLResponse(mockups_html(state), headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+# ---------------------------------------------------------------- the owner's designs -> modules (2026-10-12)
+@router.get("/{session_id}/designs")
+async def designs_board(session_id: str):
+    return design_import.module_board(await review._session(session_id))
+
+
+@router.post("/designs/match", response_model=SessionState)
+async def designs_match(req: dict):
+    sid = str(req.get("session_id", ""))
+    async with session_lock(sid, "design-match"):
+        state = await review._session(sid)
+        if not state.brand or not state.brand.blueprint:
+            raise HTTPException(400, "no designs were uploaded at Identity")
+        await design_import.match(state)
+        await store.save_session(state)
+        return state
+
+
+@router.post("/designs/assign", response_model=SessionState)
+async def designs_assign(req: DesignAssignRequest):
+    async with session_lock(req.session_id, "design-match"):
+        state = await review._session(req.session_id)
+        if not state.brand or not state.brand.blueprint:
+            raise HTTPException(400, "no designs were uploaded at Identity")
+        try:
+            design_import.assign(state, req.design_id, req.module)
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        await store.save_session(state)
+        return state
+
+
+@router.post("/designs/apply", response_model=SessionState)
+async def designs_apply(req: dict):
+    """The matched designs become screens of their modules (as uploaded designs)."""
+    sid = str(req.get("session_id", ""))
+    async with session_lock(sid, "design-match"):
+        state = await review._session(sid)
+        bp = state.brand.blueprint if state.brand else None
+        if not bp:
+            raise HTTPException(400, "no designs were uploaded at Identity")
+        folder = _dir(sid)
+        folder.mkdir(parents=True, exist_ok=True)
+        skipped, added = [], {}
+        for a in bp.designs:
+            if a.status != "business" or not a.module or a.applied:
+                continue
+            item = next((m for m in state.ui_modules if m.module == a.module), None)
+            src = design_import.path_of(sid, a.design_id)
+            if not item or not src.exists():
+                continue
+            if item.status == "Frozen" or item.revised_doc is not None:
+                skipped.append(a.module)
+                continue
+            fid = uuid.uuid4().hex[:16]
+            (folder / f"{fid}.png").write_bytes(src.read_bytes())
+            label = a.title or "Design"
+            slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "design"
+            doc = item.doc or UIDoc()
+            sc = UIScreen(screen_id=f"U{fid[:8]}", name=label, purpose=(a.description or "Your design")[:200], layout="image", route=f"/{slug}",
+                          source="upload", asset_id=fid,
+                          blocks=[UIBlock(type="image", title="image/png", text=fid, note="phone" if a.platform == "phone" else "")])
+            item.doc = doc.model_copy(update={"screens": list(doc.screens) + [sc]})
+            a.applied = sc.screen_id
+            item.generate_ok = False
+            _touched(item)
+            added.setdefault(item.ui_id, []).append(label)
+        for ui_id, names in added.items():
+            review.find(KIND, state, ui_id).thread.append(review.ReviewMessage(role="owner", at=review.now(), text="Added from your uploaded designs: " + ", ".join(names)))
+        await store.save_session(state)
+        if skipped and not added:
+            raise HTTPException(409, "unfreeze " + ", ".join(sorted(set(skipped))) + " to add designs to it")
+        return state
+
+
+@router.post("/designs/consent", response_model=SessionState)
+async def designs_consent(req: DesignConsentRequest):
+    """The owner agrees that GiveWings generates a module's screens in their style."""
+    async with session_lock(req.session_id, "design-match"):
+        state = await review._session(req.session_id)
+        item = review.find(KIND, state, req.ui_id)
+        if item.status == "Frozen":
+            raise HTTPException(409, "unfreeze this module to change it")
+        item.generate_ok = bool(req.ok)
+        await store.save_session(state)
+        return state

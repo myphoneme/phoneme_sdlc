@@ -22,6 +22,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from .. import ai_router, design_import, store
 from ..locks import session_lock
 from ..models import (
+    DesignConsentRequest,
     DesignUpdateRequest,
     BlueprintSaveRequest, BlueprintTemplateRequest,
     ChooseRequest, DomainCheck, DomainCheckRequest, LogoChoiceRequest,
@@ -441,6 +442,9 @@ async def blueprint_freeze(req: SessionRequest):
             raise HTTPException(400, "choose a template first")
         if bp.frozen:
             return state
+        err = design_import.identity_gate(state)
+        if err:
+            raise HTTPException(409, err)
         state.brand.blueprint = blueprint.freeze(blueprint.normalise(bp), bp.version)
         await store.save_session(state)
         return state
@@ -516,6 +520,21 @@ async def designs_file(session_id: str, design_id: str):
 @router.get("/{session_id}/designs/coverage")
 async def designs_coverage(session_id: str):
     return design_import.coverage(await _get(session_id))
+
+
+@router.post("/designs/consent", response_model=SessionState)
+async def designs_consent(req: DesignConsentRequest):
+    """The owner agrees (or withdraws) that empty places in the frame are generated in their style."""
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        bp = state.brand.blueprint
+        if not bp:
+            raise HTTPException(400, "choose a template first")
+        if bp.frozen:
+            raise HTTPException(409, "unfreeze the blueprint to change it")
+        bp.design_hints.generate_ok = bool(req.ok)
+        await store.save_session(state)
+        return state
 
 
 @router.post("/designs/update", response_model=SessionState)

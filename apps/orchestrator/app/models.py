@@ -164,6 +164,9 @@ class DesignAsset(BaseModel):
     status: str = "placed"   # placed | unsure | business (matched to modules at UI/UX) | ignored
     width: int = 0
     height: int = 0
+    module: str = ""         # UI/UX module this screen was matched to (step 2)
+    module_conf: float = 0.0  # AI match confidence; -1 = decided by the owner
+    applied: str = ""        # screen_id it became inside that module
 
 
 class DesignHints(BaseModel):
@@ -172,6 +175,7 @@ class DesignHints(BaseModel):
     heading_font: str = ""
     body_font: str = ""
     summary: str = ""
+    generate_ok: bool = False  # the owner agreed that empty places in the frame are generated in their style
 
 
 class ExperienceBlueprint(BaseModel):
@@ -606,6 +610,7 @@ class UIModule(BaseModel):
     status_before_revision: Optional[str] = None
     thread: list[ReviewMessage] = []
     decisions: list[Decision] = []
+    generate_ok: bool = False  # owner agreed to GiveWings generating this module's screens (no design of theirs)
 
 
 class FlowStep(BaseModel):
@@ -676,6 +681,18 @@ class ItemRequest(BaseModel):
 class ItemAnswersRequest(BaseModel):
     item_id: str
     answers: list[AnswerItem]
+
+
+class DesignAssignRequest(BaseModel):
+    session_id: str
+    design_id: str
+    module: str = ""   # "" = not for any module
+
+
+class DesignConsentRequest(BaseModel):
+    session_id: str
+    ui_id: str = ""    # a UI/UX module; empty = the Identity frame
+    ok: bool = True
 
 
 class DesignUpdateRequest(BaseModel):

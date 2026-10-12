@@ -487,3 +487,153 @@ def update(state, req) -> None:
     elif req.status == "placed" and not a.slot:
         a.status = "business"
     a.confidence = -1.0  # decided by the owner
+
+
+# ------------------------------------------------------------------ step 2: match screens to the frozen modules (UI/UX)
+def _words(t: str) -> set:
+    return set(re.findall(r"[a-z]{3,}", (t or "").lower()))
+
+
+def decidable(state, m) -> bool:
+    """Modules the owner's designs can belong to. The sign-in/profile/admin
+    modules are GiveWings standard modules and the account module follows the
+    frame, so they never wait for a design."""
+    from . import site_kit
+    spec = next((x for x in state.module_specs if x.name == m.module), None)
+    return not (site_kit.is_account(state, m.module) or (spec and spec.kind == "standard"))
+
+
+def _module_text(state, m) -> str:
+    spec = next((x for x in state.module_specs if x.name == m.module), None)
+    return f"{m.module}. {(spec.description if spec else '') or m.title}"
+
+
+def heuristic(a: DesignAsset, mods: list[tuple[str, str]]) -> tuple[str, float]:
+    aw = _words(f"{a.title} {a.tab} {a.description} {a.kind.replace('_', ' ')}")
+    best, score = "", 0
+    for name, text in mods:
+        sc = len(aw & _words(name)) * 2 + len(aw & _words(text))
+        if sc > score:
+            best, score = name, sc
+    return (best, min(0.5, 0.15 * score)) if best else ("", 0.0)
+
+
+async def match(state) -> int:
+    """Propose a module for every business screen the owner has not decided."""
+    bp = state.brand.blueprint
+    mods = [(m.module, _module_text(state, m)) for m in state.ui_modules if decidable(state, m)]
+    todo = [a for a in bp.designs if a.status == "business" and a.module_conf != -1 and not a.applied]
+    if not todo or not mods:
+        return 0
+    for a in todo:
+        a.module, a.module_conf = heuristic(a, mods)
+    names = {n for n, _ in mods}
+    prompt = (
+        f"Product: {state.selected_name}. The owner's own screen designs must be matched to the product's modules.\n\n"
+        "Modules:\n" + "\n".join(f"- {n}: {t[:240]}" for n, t in mods) + "\n\nScreens:\n"
+        + "\n".join(f"- {a.design_id} ({a.platform}, {a.kind}{', tab ' + a.tab if a.tab else ''}): {a.title}. {a.description}" for a in todo)
+        + '\n\nMatch each screen to the ONE module it belongs to, or "" when it fits none. '
+        'Answer JSON only: {"matches":[{"design_id":"..","module":"<exact module name or empty>","confidence":0.0-1.0}]}'
+    )
+    try:
+        r = await ai_router.generate(ai_router.Feature.TECH_DESIGN_GENERATION, prompt,
+                                     system="You are a product analyst matching screen designs to modules. JSON only.")
+        d = reqdoc._extract_json(r["text"])
+        for x in (d.get("matches") if isinstance(d, dict) else []) or []:
+            a = next((t for t in todo if t.design_id == str(x.get("design_id", ""))), None)
+            mod = str(x.get("module") or "")
+            if a and (mod in names or not mod):
+                try:
+                    conf = max(0.0, min(1.0, float(x.get("confidence", 0.6))))
+                except (TypeError, ValueError):
+                    conf = 0.6
+                a.module, a.module_conf = mod, (conf if mod else 0.0)
+    except Exception as e:  # the heuristic proposal stands; the owner checks it anyway
+        logger.warning("design match fell back to keywords: %s", e)
+    return len(todo)
+
+
+def assign(state, design_id: str, module: str) -> None:
+    bp = state.brand.blueprint
+    a = next((x for x in bp.designs if x.design_id == design_id), None)
+    if not a:
+        raise KeyError("design not found")
+    if a.applied:
+        raise ValueError("this design is already inside a module -- remove that screen there first")
+    if module and not any(m.module == module and decidable(state, m) for m in state.ui_modules):
+        raise ValueError("that module does not take designs")
+    a.module, a.module_conf = module, -1.0
+    if a.status == "ignored":
+        a.status = "business"
+
+
+def module_board(state) -> dict:
+    """What the owner checks at UI/UX: each module with its screens, the loose
+    ones, and which modules still need a decision."""
+    bp = state.brand.blueprint
+    if not bp or not any(a.status != "ignored" for a in bp.designs):
+        return {"active": False, "modules": [], "loose": [], "pending_apply": 0, "blocked": None}
+    live = [a for a in bp.designs if a.status == "business"]
+    mods = []
+    for m in state.ui_modules:
+        if not decidable(state, m):
+            continue
+        ups = [s for s in (m.doc.screens if m.doc else []) if s.source == "upload"]
+        mine = [a for a in live if a.module == m.module]
+        mods.append({"ui_id": m.ui_id, "module": m.module, "frozen": m.status == "Frozen",
+                     "designs": [a.design_id for a in mine if not a.applied], "applied": [a.design_id for a in mine if a.applied],
+                     "uploads": len(ups), "generate_ok": m.generate_ok,
+                     "state": "yours" if (ups or mine) else ("generate" if m.generate_ok else "decide")})
+    out = {"active": True, "modules": mods, "loose": [a.design_id for a in live if not a.module],
+           "pending_apply": sum(1 for a in live if a.module and not a.applied)}
+    out["blocked"] = _blocked(out)
+    return out
+
+
+def gaps(state) -> list[str]:
+    return [s["label"] for s in coverage(state)["slots"] if s["status"] == "generate"]
+
+
+def identity_gate(state) -> str | None:
+    """Empty places in the frame need an answer: upload, or agree to generate."""
+    bp = state.brand.blueprint
+    if not bp or not any(a.status != "ignored" for a in bp.designs) or bp.design_hints.generate_ok:
+        return None
+    g = gaps(state)
+    if g:
+        return (f"{len(g)} place{'s' if len(g) != 1 else ''} in the frame have no design ({', '.join(g[:4])}{'…' if len(g) > 4 else ''}). "
+                "Upload them, or choose \"Generate them in my style\" -- then freeze.")
+    return None
+
+
+def module_gate(state) -> str | None:
+    return module_board(state)["blocked"]
+
+
+def _blocked(b: dict) -> str | None:
+    if b["loose"]:
+        return f"{len(b['loose'])} of your screens are not matched to a module -- assign each one, or mark it \"not a screen\"."
+    if b["pending_apply"]:
+        return "Add your matched designs to their modules (button on the design board) before the baseline."
+    need = [m["module"] for m in b["modules"] if m["state"] == "decide"]
+    if need:
+        return "Decide for " + ", ".join(need[:4]) + (f" and {len(need) - 4} more" if len(need) > 4 else "") + ": upload your design, or let GiveWings generate it in your style."
+    return None
+
+
+def style_text(state) -> str:
+    """The look read off the owner's designs, handed to every generation prompt."""
+    bp = state.brand.blueprint if state.brand else None
+    if not bp or not any(a.status != "ignored" for a in bp.designs):
+        return ""
+    h = bp.design_hints
+    bits = [h.summary] if h.summary else []
+    if h.colors:
+        bits.append("colours " + ", ".join(f"{k} {v}" for k, v in h.colors.items() if v))
+    if h.heading_font or h.body_font:
+        bits.append(f"type {h.heading_font or '-'} / {h.body_font or '-'}")
+    bits.append(f"corners {bp.tokens.radius}, spacing {bp.tokens.density}")
+    done = [a.title for a in bp.designs if a.status in ("placed", "business") and a.title][:12]
+    if done:
+        bits.append("the owner's own screens already exist for: " + "; ".join(done))
+    return "The owner supplied their own designs. Generate anything missing in that same look -- " + "; ".join(bits) + "."
