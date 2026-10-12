@@ -92,6 +92,51 @@ fail_once = {"on": True}
 flow_prompts = []
 ai_router.generate = fake
 
+# --- fake vision: the synthetic designs carry their identity in their fill colour
+VISION = {
+    (230, 60, 60): {"platform": "phone", "kind": "home", "title": "Home", "tab": "Home", "tabs": ["Home", "Library", "Create", "Profile"], "nav": "tabs"},
+    (60, 180, 90): {"platform": "phone", "kind": "list", "title": "Library", "tab": "Library", "tabs": ["Home", "Library", "Create", "Profile"], "nav": "tabs"},
+    (60, 90, 220): {"platform": "phone", "kind": "share", "title": "Save to RelayReel", "tab": "", "tabs": [], "nav": "none"},
+    (240, 200, 40): {"platform": "web", "kind": "landing", "title": "Landing", "nav": "top", "landing_sections": ["hero", "features", "download", "faq"], "confidence": 0.95},
+    (150, 60, 200): {"platform": "web", "kind": "sign_in", "title": "Sign in", "nav": "none", "sign_in_methods": ["mobile_otp", "google", "fax"], "confidence": 0.4},
+}
+vision_calls = []
+async def fake_vision(feature, prompt, images, system=None):
+    from PIL import Image as _I
+    import io as _io
+    im = _I.open(_io.BytesIO(images[0][1])).convert("RGB")
+    vision_calls.append(im.size)
+    if "mockup board" in prompt:
+        return {"text": '{"screens": []}'}
+    px = im.resize((1, 1)).getpixel((0, 0)) if False else im.getpixel((im.width // 2, im.height // 2))
+    key = min(VISION, key=lambda k: sum(abs(a - b) for a, b in zip(k, px)))
+    d = {"is_screen": True, "confidence": 0.9, "colors": {"primary": "#ff6254", "ink": "#15151B", "surface": "#FAF9F6", "accent": "nope"},
+         "heading_font": "Manrope", "body_font": "DM Sans", "radius": "soft", "density": "comfortable", "description": "x"}
+    d.update(VISION[key])
+    return {"text": json.dumps(d)}
+ai_router.generate_vision = fake_vision
+
+def _png(img):
+    import io as _io
+    b = _io.BytesIO(); img.save(b, "PNG"); return b.getvalue()
+
+def design_files():
+    from PIL import Image as _I, ImageDraw as _D
+    import io as _io, zipfile as _zf
+    board = _I.new("RGB", (1500, 900), (238, 236, 230)); d = _D.Draw(board)
+    for i, col in enumerate([(230, 60, 60), (60, 180, 90), (60, 90, 220)]):
+        x = 120 + i * 460
+        d.rounded_rectangle((x, 80, x + 330, 820), radius=40, fill=(20, 20, 24))
+        d.rounded_rectangle((x + 14, 94, x + 316, 806), radius=30, fill=col)
+        d.text((x, 40), f"0{i+1} screen", fill=(40, 40, 40))
+    landing = _I.new("RGB", (1440, 900), (240, 200, 40))
+    signin = _I.new("RGB", (1280, 800), (150, 60, 200))
+    z = _io.BytesIO()
+    with _zf.ZipFile(z, "w") as zz:
+        zz.writestr("web/sign-in.png", _png(signin)); zz.writestr("notes.txt", "ignore me")
+    return [("files", ("relayreel-board.png", _png(board), "image/png")), ("files", ("landing.png", _png(landing), "image/png")),
+            ("files", ("more.zip", z.getvalue(), "application/zip"))]
+
 async def fake_check(client, d):
     from app.models import DomainCheck
     return DomainCheck(domain=d, status="taken" if d.endswith(".com") and not d.startswith("get") else "available", method="rdap")
@@ -144,10 +189,43 @@ async def run():
         s = await post("/api/identity/blueprint", {"session_id": sid, "blueprint": bp})
         bp = s["brand"]["blueprint"]
         assert bp["landing_sections"] == ["hero", "faq", "download"] and bp["tokens"]["heading_font"] == "Space Grotesk" and len(bp["mobile"]["tabs"]) == 5, bp
+        # --- Bring your own designs: one upload, boards split, screens read and placed in the frame
+        up = await c.post(f"/api/identity/{sid}/designs", files=design_files()); assert up.status_code == 200, up.text
+        for _ in range(100):
+            s = (await c.get(f"/api/discovery/{sid}")).json()
+            if s["design_import"]["status"] != "running": break
+            await asyncio.sleep(0.05)
+        bp = s["brand"]["blueprint"]; ds = bp["designs"]
+        assert s["design_import"]["status"] == "done" and len(ds) == 5, (s["design_import"], [(d["original"], d["kind"]) for d in ds])
+        assert [d["original"] for d in ds] == ["relayreel-board.png"] * 3 + ["landing.png", "sign-in.png"], ds
+        assert sum(1 for w, h in vision_calls if h > 2 * w) == 3, vision_calls   # board split into three phone screens
+        assert bp["platforms"] == "both" and bp["primary"] == "mobile" and bp["mobile"]["tabs"] == ["Home", "Library", "Create", "Profile"], bp
+        assert bp["mobile"]["share_target"] and bp["landing_sections"] == ["hero", "features", "download", "faq"] and bp["auth"]["methods"] == ["mobile_otp", "google"], bp
+        assert bp["tokens"]["heading_font"] == "Manrope" and bp["tokens"]["radius"] == "soft" and bp["design_hints"]["colors"] == {"primary": "#FF6254", "ink": "#15151B", "surface": "#FAF9F6"}, bp
+        cov = (await c.get(f"/api/identity/{sid}/designs/coverage")).json()
+        st = {x["slot"]: x["status"] for x in cov["slots"]}
+        assert st["landing"] == "placed" and st["sign_in"] == "unsure" and st["tab:Home"] == "placed" and st["tab:Library"] == "placed" and st["share"] == "placed", st
+        assert st["tab:Create"] == "generate" and st["sign_up"] == "generate" and cov["palette_differs"], cov
+        signin = next(d for d in ds if d["kind"] == "sign_in")
+        s = await post("/api/identity/designs/update", {"session_id": sid, "design_id": signin["design_id"], "slot": "sign_in"})
+        assert next(d for d in s["brand"]["blueprint"]["designs"] if d["design_id"] == signin["design_id"])["status"] == "placed"
+        await post("/api/identity/designs/update", {"session_id": sid, "design_id": signin["design_id"], "slot": "nowhere"}, 400)
+        f = await c.get(f"/api/identity/{sid}/designs/file/{signin['design_id']}"); assert f.status_code == 200 and f.headers["content-type"] == "image/png"
+        s = await post("/api/identity/designs/use-colours", {"session_id": sid}); assert s["brand"]["palette"]["primary"] == "#FF6254"
+        s = await post("/api/identity/palette", {"session_id": sid, "palette": s["brand"]["palette_options"][0]})   # back to the teal brand
+        s = await post("/api/identity/logos", {"session_id": sid}); await post("/api/identity/logo", {"session_id": sid, "logo_id": s["brand"]["logo_options"][0]["id"]})
+        stale = dict(s["brand"]["blueprint"]); stale["designs"] = []
+        s = await post("/api/identity/blueprint", {"session_id": sid, "blueprint": stale}); assert len(s["brand"]["blueprint"]["designs"]) == 5   # server-managed
         pv = await c.get(f"/api/identity/{sid}/blueprint/preview")
-        assert pv.status_code == 200 and 'class="tabbar"' in pv.text and 'class="qr"' in pv.text and "Share to RelayReel" in pv.text and "Send me a code" in pv.text, pv.text[:200]
+        assert pv.text.count(f"/api/identity/{sid}/designs/file/") >= 5, pv.text.count("/designs/file/")
+        s = await post("/api/identity/blueprint/template", {"session_id": sid, "template_key": "mobile_diary"})
+        bp = s["brand"]["blueprint"]; bp["landing_sections"] = ["faq", "download", "bogus", "faq"]; bp["tokens"]["heading_font"] = "Comic Sans"; bp["mobile"]["tabs"] = ["Diary", "Search", "", "Insights", "Profile", "Extra"]
+        s = await post("/api/identity/blueprint", {"session_id": sid, "blueprint": bp}); bp = s["brand"]["blueprint"]
+        pv = await c.get(f"/api/identity/{sid}/blueprint/preview")
+        assert pv.status_code == 200 and 'class="tabbar"' in pv.text and "/designs/file/" in pv.text and "Share to RelayReel" in pv.text, pv.text[:200]
         s = await post("/api/identity/blueprint/freeze", {"session_id": sid}); assert s["brand"]["blueprint"]["version"] == "1.0"
         await post("/api/identity/blueprint", {"session_id": sid, "blueprint": bp}, 409)
+        assert (await c.post(f"/api/identity/{sid}/designs", files=design_files())).status_code == 409   # frozen
         s = await post("/api/identity/blueprint/unfreeze", {"session_id": sid})
         s = await post("/api/identity/blueprint/template", {"session_id": sid, "template_key": "saas"})
         s = await post("/api/identity/blueprint/freeze", {"session_id": sid}); bp = s["brand"]["blueprint"]

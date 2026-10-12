@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowRight, ArrowUp, ExternalLink, Globe, Lock, LockOpen, RefreshCw, Save, Smartphone, Sparkles } from "lucide-react";
 import { api } from "../api.js";
+import DesignImport from "./DesignImport.jsx";
 
 // Experience Blueprint (2026-10-07): the portal's structure and look are
 // chosen here, at Identity, previewed as a clickable branded skeleton and
@@ -102,7 +103,9 @@ export default function ExperienceStep({ session, setSession, next, compact = fa
     <div className={"id-step bp-step" + (compact ? " compact" : "")}>
       <p className="muted">Decide how {session.selected_name || "the product"} is organised and how it looks, once, here. Pick a starting point, adjust it, click through the preview, then freeze it. The UI/UX stage designs each module's screens inside this frame.</p>
 
-      <h4 className="mini-head">1. Starting point</h4>
+      <DesignImport session={session} setSession={setSession} frozen={frozen} />
+
+      <h4 className="mini-head">1. Starting point{(saved?.designs || []).length ? " (filled from your designs — adjust if needed)" : ""}</h4>
       <div className="bp-templates">
         {templates.map((t) => (
           <button key={t.key} type="button" disabled={frozen || !!busy} className={"bp-template" + (bp?.template_key === t.key ? " selected" : "")}
@@ -116,8 +119,8 @@ export default function ExperienceStep({ session, setSession, next, compact = fa
           </button>
         ))}
         <div className="bp-template soon" aria-disabled="true">
-          <span className="bp-template-top"><strong>Reference site or your own designs</strong><span className="chip">Next release</span></span>
-          <small>Paste a live site or demo URL, or upload screenshots / PDF, and GiveWings proposes the structure from it.</small>
+          <span className="bp-template-top"><strong>Reference site</strong><span className="chip">Next release</span></span>
+          <small>Paste a live site or demo URL and GiveWings proposes the structure from it. For your own designs, use the upload above.</small>
         </div>
       </div>
 

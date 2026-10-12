@@ -228,6 +228,42 @@ def _home_blocks(home: str, name: str) -> list[UIBlock]:
             UIBlock(type="notice", title="Your modules plug in here.", text=f"After Freeze Scope each {name} module gets a place in this frame.")]
 
 
+def design_screen(a, screen_id: str, name: str) -> UIScreen:
+    """An owner's design shown as a screen (uploaded image)."""
+    return UIScreen(screen_id=screen_id, name=name, purpose=a.description or "Your design.", layout="image", source="upload",
+                    asset_id=a.design_id, route=f"/design/{a.design_id}",
+                    blocks=[UIBlock(type="image", title="image/png", text=a.design_id, note=a.platform)])
+
+
+def _use_designs(bp: ExperienceBlueprint, mods: list[UIModule]) -> None:
+    """Show the owner's placed designs in the preview instead of the skeleton."""
+    placed = {a.slot: a for a in bp.designs if a.slot and a.status in ("placed", "unsure")}
+    if not placed:
+        return
+    kit = {"landing": "K1", "sign_up": "K2", "sign_in": "K3", "onboarding": "K4"}
+    acct = mods[0].doc.screens
+    for slot, sid in kit.items():
+        a = placed.get(slot)
+        for i, sc in enumerate(acct):
+            if a and sc.screen_id == sid:
+                acct[i] = design_screen(a, sid, sc.name)
+    home = mods[1].doc.screens
+    for i, sc in enumerate(home):
+        if sc.screen_id == "H1" and "web_home" in placed:
+            home[i] = design_screen(placed["web_home"], "H1", sc.name)
+        if sc.screen_id == "M2" and "share" in placed:
+            home[i] = design_screen(placed["share"], "M2", sc.name)
+    tabs = [s for s in placed if s.startswith("tab:")]
+    if tabs:
+        first = f"tab:{bp.mobile.tabs[0]}" if bp.mobile.tabs else ""
+        for i, sc in enumerate(home):
+            if sc.screen_id == "M1" and first in placed:
+                home[i] = design_screen(placed[first], "M1", sc.name)
+        extra = [f"tab:{t}" for t in bp.mobile.tabs[1:] if f"tab:{t}" in placed]
+        for n, key in enumerate(extra):
+            home.append(design_screen(placed[key], f"T{n + 2}", key[4:]))
+
+
 def preview_modules(state, bp: ExperienceBlueprint) -> tuple[list[UIModule], list[str]]:
     """UI modules for the skeleton prototype, plus the web navigation items."""
     from . import site_kit
@@ -267,6 +303,7 @@ def preview_modules(state, bp: ExperienceBlueprint) -> tuple[list[UIModule], lis
                                 route=f"/{re.sub(r'[^a-z0-9]+', '-', sname.lower()).strip('-')}", layout=lay,
                                 blocks=[UIBlock(type="notice", title="Module area.", text=f"{sname} is drawn here, inside this frame, in the UI/UX stage."),
                                         UIBlock(type="media", title="Module content")])])
+    _use_designs(bp, mods)
     mod(9, "Settings", [UIScreen(screen_id="S1", name="Settings", purpose="Standard settings every product ships with.", route="/settings",
                                  layout="mobile" if bp.primary == "mobile" else "app",
                                  blocks=[UIBlock(type="list", items=["Profile — name, photo", "Notifications — email, push", "Connected accounts — social, storage",

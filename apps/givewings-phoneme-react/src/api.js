@@ -89,6 +89,20 @@ export const api = {
   freezeBlueprint: (session_id) => post("/identity/blueprint/freeze", { session_id }),
   unfreezeBlueprint: (session_id) => post("/identity/blueprint/unfreeze", { session_id }),
   blueprintPreviewUrl: (sid) => `${BASE}/identity/${sid}/blueprint/preview`,
+  importDesigns: async (sid, files) => {
+    const fd = new FormData();
+    [...files].forEach((f) => fd.append("files", f));
+    const res = await fetch(`${BASE}/identity/${sid}/designs`, { method: "POST", body: fd });
+    if (!res.ok) {
+      let d = await res.text();
+      try { d = JSON.parse(d).detail || d; } catch { /* raw */ }
+      throw new Error(typeof d === "string" ? d : `upload failed (${res.status})`);
+    }
+    return res.json();
+  },
+  designCoverage: (sid) => get(`/identity/${sid}/designs/coverage`),
+  updateDesign: (session_id, design_id, patch) => post("/identity/designs/update", { session_id, design_id, ...patch }),
+  useDesignColours: (session_id) => post("/identity/designs/use-colours", { session_id }),
   saveModules: (session_id, modules) => post("/wizard/modules/save", { session_id, modules }),
   confirmModules: (session_id) => post("/wizard/modules/confirm", { session_id }),
   updateFlow: (session_id, module, steps) => post("/wizard/flows/update", { session_id, module, steps }),

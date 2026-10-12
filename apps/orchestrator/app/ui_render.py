@@ -275,7 +275,8 @@ def _image(b, ctx) -> str:
     if b.title == "application/pdf":
         return (f'<object class="upload-pdf" data="{E(src)}" type="application/pdf"><p>PDF design: '
                 f'<a href="{E(src)}">open</a></p></object>' + (f'<div class="btns"><span class="btn btn-primary"{_goto(nxt)}>Next screen →</span></div>' if nxt else ""))
-    return f'<div class="upload-shot"{_goto(nxt)}><img alt="Uploaded design" src="{E(src)}"></div>'
+    cap = ' style="max-width:380px"' if b.note == "phone" else ""
+    return f'<div class="upload-shot"{_goto(nxt)}><img alt="Uploaded design" src="{E(src)}"{cap}></div>'
 
 
 def _tabbar(state, flow, module) -> str:

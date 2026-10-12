@@ -148,6 +148,32 @@ class MobileShell(BaseModel):
     offline: bool = False
 
 
+class DesignAsset(BaseModel):
+    """2026-10-10: one screen from the owner's own designs, uploaded in one
+    batch at Identity, split out of mockup boards and sorted by AI into the
+    frame (landing, sign-in, a phone tab ...) or kept for the module screens."""
+    design_id: str
+    original: str = ""       # uploaded file name
+    platform: str = "phone"  # phone | web
+    kind: str = "other"      # landing | sign_in | sign_up | onboarding | home | list | detail | create | publish | settings | profile | share | other
+    title: str = ""
+    tab: str = ""            # tab / menu item the screen sits under
+    slot: str = ""           # frame slot it fills: landing | sign_in | sign_up | onboarding | share | web_home | tab:<name>
+    description: str = ""
+    confidence: float = 0.0
+    status: str = "placed"   # placed | unsure | business (matched to modules at UI/UX) | ignored
+    width: int = 0
+    height: int = 0
+
+
+class DesignHints(BaseModel):
+    """What the AI read off the owner's designs (applied on request)."""
+    colors: dict[str, str] = {}   # primary, ink, surface, accent
+    heading_font: str = ""
+    body_font: str = ""
+    summary: str = ""
+
+
 class ExperienceBlueprint(BaseModel):
     """2026-10-07: the portal's structure and look, decided and frozen at
     Identity with the brand, so UI/UX only fills module screens into an
@@ -167,6 +193,8 @@ class ExperienceBlueprint(BaseModel):
     version: str = ""  # set when frozen: 1.0, 1.1 ...
     frozen: bool = False
     frozen_at: str = ""
+    designs: list[DesignAsset] = []   # the owner's own designs (server-managed)
+    design_hints: DesignHints = DesignHints()
 
 
 class BrandIdentity(BaseModel):
@@ -232,6 +260,8 @@ class SessionState(BaseModel):
     # user journeys over the UI/UX screens; closes the documentation stage.
     ux_flows: list["UXFlow"] = []
     ux_generation: GenerationProgress = GenerationProgress()
+    # Identity: analysing the owner's uploaded designs (one item per screen)
+    design_import: GenerationProgress = GenerationProgress()
     # discovery -> confirm -> research -> identity -> freeze -> flow -> generating -> manager
     stage: str = "discovery"
 
@@ -646,6 +676,16 @@ class ItemRequest(BaseModel):
 class ItemAnswersRequest(BaseModel):
     item_id: str
     answers: list[AnswerItem]
+
+
+class DesignUpdateRequest(BaseModel):
+    session_id: str
+    design_id: str
+    platform: Optional[str] = None
+    kind: Optional[str] = None
+    slot: Optional[str] = None
+    status: Optional[str] = None
+    title: Optional[str] = None
 
 
 class ScreenEditRequest(BaseModel):

@@ -17,11 +17,12 @@ import uuid
 import xml.etree.ElementTree as ET
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from .. import ai_router, store
+from .. import ai_router, design_import, store
 from ..locks import session_lock
 from ..models import (
+    DesignUpdateRequest,
     BlueprintSaveRequest, BlueprintTemplateRequest,
     ChooseRequest, DomainCheck, DomainCheckRequest, LogoChoiceRequest,
     LogoConcept, Palette, PaletteRequest, SessionRequest, SessionState,
@@ -405,8 +406,10 @@ async def blueprint_template(req: BlueprintTemplateRequest):
         except KeyError:
             raise HTTPException(404, "unknown template")
         old = state.brand.blueprint
-        if old:  # keep the version history and module placement
+        if old:  # keep the version history, module placement and the owner's designs
             bp.version, bp.module_slots = old.version, old.module_slots
+            bp.designs, bp.design_hints = old.designs, old.design_hints
+            design_import.place(bp)
         state.brand.blueprint = bp
         await store.save_session(state)
         return state
@@ -421,6 +424,8 @@ async def blueprint_save(req: BlueprintSaveRequest):
         bp = blueprint.normalise(req.blueprint)
         old = state.brand.blueprint
         bp.version, bp.frozen, bp.frozen_at = (old.version if old else ""), False, ""
+        bp.designs, bp.design_hints = (old.designs, old.design_hints) if old else ([], bp.design_hints)  # server-managed
+        design_import.place(bp)
         state.brand.blueprint = bp
         await store.save_session(state)
         return state
@@ -462,8 +467,87 @@ async def blueprint_preview(session_id: str):
     if not bp:
         raise HTTPException(404, "no blueprint yet")
     mods, nav = blueprint.preview_modules(state, bp)
-    html = ui_render.prototype(state, mods, nav=nav, title="experience blueprint preview")
+    html = ui_render.prototype(state, mods, nav=nav, title="experience blueprint preview",
+                               asset=lambda fid: f"/api/identity/{session_id}/designs/file/{fid}")
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+# ---------------------------------------------------------------- the owner's own designs
+@router.post("/{session_id}/designs", response_model=SessionState)
+async def designs_upload(session_id: str, files: list[UploadFile] = File(...)):
+    """One upload for every design: boards are split into screens, every
+    screen is read by AI in the background and placed in the frame."""
+    from .. import blueprint
+    async with session_lock(session_id, "blueprint"):
+        state = await _get(session_id)
+        _editable(state)
+        if state.design_import.status == "running":
+            raise HTTPException(409, "still reading your last upload — wait a moment")
+        if len(files) > design_import.MAX_FILES:
+            raise HTTPException(400, f"upload at most {design_import.MAX_FILES} files at a time (a zip counts as one)")
+        got = []
+        for f in files:
+            data = await f.read(design_import.MAX_BYTES + 1)
+            if len(data) > design_import.MAX_BYTES:
+                raise HTTPException(413, f"{f.filename}: larger than {design_import.MAX_BYTES // (1024 * 1024)} MB")
+            got.append((f.filename or "design.png", data))
+        if not state.brand.blueprint:
+            state.brand.blueprint = blueprint.from_template(blueprint.suggest(state), state)
+            await store.save_session(state)
+        try:
+            await design_import.start(session_id, got)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return await _get(session_id)
+
+
+@router.get("/{session_id}/designs/file/{design_id}")
+async def designs_file(session_id: str, design_id: str):
+    from fastapi.responses import FileResponse
+    try:
+        p = design_import.path_of(session_id, design_id)
+    except ValueError:
+        raise HTTPException(400, "bad id")
+    if not p.exists():
+        raise HTTPException(404, "design not found")
+    return FileResponse(p, media_type="image/png", headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/{session_id}/designs/coverage")
+async def designs_coverage(session_id: str):
+    return design_import.coverage(await _get(session_id))
+
+
+@router.post("/designs/update", response_model=SessionState)
+async def designs_update(req: DesignUpdateRequest):
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        _editable(state)
+        try:
+            design_import.update(state, req)
+        except KeyError:
+            raise HTTPException(404, "design not found")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        await store.save_session(state)
+        return state
+
+
+@router.post("/designs/use-colours", response_model=SessionState)
+async def designs_use_colours(req: SessionRequest):
+    """Switch the brand colours to the ones read off the owner's designs."""
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        _editable(state)
+        c = state.brand.blueprint.design_hints.colors if state.brand.blueprint else {}
+        if not c.get("primary"):
+            raise HTTPException(400, "no colours were read from your designs")
+        base = state.brand.palette or Palette()
+        state.brand.palette = Palette(name="From your designs", mood=base.mood, rationale="Taken from the uploaded designs.",
+                                      primary=c["primary"], ink=c.get("ink") or base.ink, surface=c.get("surface") or base.surface,
+                                      accent=c.get("accent") or base.accent)
+        await store.save_session(state)
+        return state
 
 
 @router.post("/complete", response_model=SessionState)

@@ -31,6 +31,7 @@ class Feature(str, Enum):
     COMPETITIVE_RESEARCH = "competitive_research"
     CONCEPT_BRIEF = "concept_brief"
     BRAND_IDENTITY = "brand_identity"
+    DESIGN_VISION = "design_vision"  # reading the owner's uploaded screen designs
     # Non-critical — Ollama tier (BRD/PRD Section 18.8)
     DISCOVERY_CHAT_NLU = "discovery_chat_nlu"
     NAME_AVAILABILITY_CHECK = "name_availability_check"
@@ -44,6 +45,7 @@ CRITICAL_FEATURES = {
     Feature.COMPETITIVE_RESEARCH,
     Feature.CONCEPT_BRIEF,
     Feature.BRAND_IDENTITY,
+    Feature.DESIGN_VISION,
 }
 
 # Features that should be answered with live web-search grounding rather
@@ -251,3 +253,79 @@ async def generate(feature: Feature, prompt: str, system: str | None = None) -> 
     else:
         text = await _call_ollama(prompt, system)
         return {"text": text, "tier": "ollama", "model": config.OLLAMA_MODEL, "fallback": False}
+
+
+# ---------------------------------------------------------------- vision
+# 2026-10-10: reading uploaded screen designs. Images go to the configured
+# commercial provider only -- the local model cannot see, so there is no
+# Ollama fallback; callers surface the error instead.
+def _b64(data: bytes) -> str:
+    import base64
+    return base64.b64encode(data).decode()
+
+
+async def _vision_openai(prompt, images, system):
+    if not config.OPENAI_API_KEY:
+        raise AIRouterError("OPENAI_API_KEY not configured")
+    content = [{"type": "input_text", "text": prompt}] + [
+        {"type": "input_image", "image_url": f"data:{mime};base64,{_b64(data)}"} for mime, data in images]
+    payload = {"model": config.OPENAI_MODEL, "input": [{"role": "user", "content": content}]}
+    if system:
+        payload["instructions"] = system
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post("https://api.openai.com/v1/responses",
+                                 headers={"Authorization": f"Bearer {config.OPENAI_API_KEY}", "content-type": "application/json"}, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+    texts = [b.get("text", "") for it in data.get("output", []) if it.get("type") == "message"
+             for b in it.get("content", []) if b.get("type") == "output_text"]
+    if not texts:
+        raise AIRouterError(f"Unexpected OpenAI response shape: {data!r}"[:500])
+    return "".join(texts)
+
+
+async def _vision_anthropic(prompt, images, system):
+    if not config.ANTHROPIC_API_KEY:
+        raise AIRouterError("ANTHROPIC_API_KEY not configured")
+    content = [{"type": "image", "source": {"type": "base64", "media_type": mime, "data": _b64(data)}} for mime, data in images]
+    content.append({"type": "text", "text": prompt})
+    payload = {"model": config.ANTHROPIC_MODEL, "max_tokens": 2048, "messages": [{"role": "user", "content": content}]}
+    if system:
+        payload["system"] = system
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post("https://api.anthropic.com/v1/messages", json=payload, headers={
+            "x-api-key": config.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+        resp.raise_for_status()
+        data = resp.json()
+    return "".join(b["text"] for b in data.get("content", []) if b.get("type") == "text")
+
+
+async def _vision_gemini(prompt, images, system):
+    if not config.GEMINI_API_KEY:
+        raise AIRouterError("GEMINI_API_KEY not configured")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
+    parts = [{"inline_data": {"mime_type": mime, "data": _b64(data)}} for mime, data in images] + [{"text": prompt}]
+    payload = {"contents": [{"role": "user", "parts": parts}]}
+    if system:
+        payload["systemInstruction"] = {"parts": [{"text": system}]}
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(url, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+    return "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+
+
+_VISION_BACKENDS = {"openai": _vision_openai, "anthropic": _vision_anthropic, "gemini": _vision_gemini}
+
+
+async def generate_vision(feature: Feature, prompt: str, images: list, system: str | None = None) -> dict:
+    """Prompt + images (list of (mime, bytes)) -> {"text", "model"}. Raises
+    AIRouterError when the configured provider cannot read images."""
+    backend = _VISION_BACKENDS.get(config.COMMERCIAL_PROVIDER)
+    if not backend:
+        raise AIRouterError(f"reading designs needs an image-capable provider (openai, anthropic or gemini); configured: {config.COMMERCIAL_PROVIDER}")
+    try:
+        text = await backend(prompt, images, system)
+    except httpx.HTTPError as exc:
+        raise AIRouterError(f"{config.COMMERCIAL_PROVIDER} could not read the image: {type(exc).__name__}: {str(exc)[:160]}") from exc
+    return {"text": text, "model": config.COMMERCIAL_PROVIDER}
