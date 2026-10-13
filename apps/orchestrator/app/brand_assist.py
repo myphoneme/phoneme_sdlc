@@ -63,7 +63,7 @@ def snapshot(state) -> dict:
     b = state.brand
     return {"tagline": b.tagline, "palette": b.palette.model_dump() if b.palette else None,
             "favicon_style": b.favicon_style, "favicon_letter": b.favicon_letter, "logo_placement": b.logo_placement,
-            "blueprint": b.blueprint.model_dump(exclude={"designs", "design_files", "design_hints"}) if b.blueprint else None}
+            "blueprint": b.blueprint.model_dump(exclude={"designs", "design_files", "design_flows", "design_hints"}) if b.blueprint else None}
 
 
 def restore(state, snap: dict) -> None:
@@ -73,7 +73,7 @@ def restore(state, snap: dict) -> None:
     b.palette = Palette(**snap["palette"]) if snap.get("palette") else None
     b.favicon_style, b.favicon_letter, b.logo_placement = snap.get("favicon_style", "monogram"), snap.get("favicon_letter", ""), snap.get("logo_placement", "left")
     if snap.get("blueprint") and b.blueprint:
-        keep = {"designs": b.blueprint.designs, "design_files": b.blueprint.design_files, "design_hints": b.blueprint.design_hints}
+        keep = {"designs": b.blueprint.designs, "design_files": b.blueprint.design_files, "design_flows": b.blueprint.design_flows, "design_hints": b.blueprint.design_hints}
         b.blueprint = ExperienceBlueprint(**snap["blueprint"], **keep)
 
 
@@ -142,7 +142,7 @@ def apply(state, section: str, ch: dict) -> list[str]:
                     setattr(x.mobile, k, ch[k])
         x = blueprint.normalise(x)
         before, after = bp.model_dump(), x.model_dump()
-        diff = [k for k in after if before.get(k) != after.get(k) and k not in ("designs", "design_files", "design_hints")]
+        diff = [k for k in after if before.get(k) != after.get(k) and k not in ("designs", "design_files", "design_flows", "design_hints")]
         if diff:
             state.brand.blueprint = x
             from . import design_import

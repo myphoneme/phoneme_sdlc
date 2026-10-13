@@ -463,8 +463,8 @@ async def designs_apply(req: dict):
         folder = _dir(sid)
         folder.mkdir(parents=True, exist_ok=True)
         skipped, added = [], {}
-        for a in bp.designs:
-            if a.status != "business" or not a.module or a.applied:
+        for a in design_import.candidates(bp):  # in board order, so a flow stays a flow
+            if not a.module or a.module == design_import.NONE or a.applied:
                 continue
             item = next((m for m in state.ui_modules if m.module == a.module), None)
             src = design_import.path_of(sid, a.design_id)

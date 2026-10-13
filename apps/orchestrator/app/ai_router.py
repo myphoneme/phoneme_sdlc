@@ -12,6 +12,7 @@ back to Ollama with a warning, so the app still runs end-to-end without
 commercial credentials — but this fallback must never happen on staging for
 a feature marked critical without the tier being explicitly downgraded.
 """
+import asyncio
 import logging
 from enum import Enum
 
@@ -324,8 +325,31 @@ async def generate_vision(feature: Feature, prompt: str, images: list, system: s
     backend = _VISION_BACKENDS.get(config.COMMERCIAL_PROVIDER)
     if not backend:
         raise AIRouterError(f"reading designs needs an image-capable provider (openai, anthropic or gemini); configured: {config.COMMERCIAL_PROVIDER}")
-    try:
-        text = await backend(prompt, images, system)
-    except httpx.HTTPError as exc:
-        raise AIRouterError(f"{config.COMMERCIAL_PROVIDER} could not read the image: {type(exc).__name__}: {str(exc)[:160]}") from exc
-    return {"text": text, "model": config.COMMERCIAL_PROVIDER}
+    delays = [2, 6, 15, 30]  # 2026-10-13: rate limits (429) and busy servers are retried, honouring Retry-After
+    for attempt in range(len(delays) + 1):
+        try:
+            text = await backend(prompt, images, system)
+            return {"text": text, "model": config.COMMERCIAL_PROVIDER}
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code
+            body = ""
+            try:
+                body = (exc.response.json().get("error") or {}).get("message", "") or ""
+            except Exception:  # noqa: BLE001
+                body = exc.response.text[:200]
+            quota = "quota" in body.lower() or "billing" in body.lower()
+            if code in (429, 500, 502, 503, 529) and not quota and attempt < len(delays):
+                try:
+                    wait = min(60.0, float(exc.response.headers.get("retry-after", delays[attempt])))
+                except ValueError:
+                    wait = delays[attempt]
+                logger.info("vision %s returned %s; retrying in %.0fs", config.COMMERCIAL_PROVIDER, code, wait)
+                await asyncio.sleep(wait)
+                continue
+            why = "the AI account has run out of credit (quota)" if quota else "the AI service is rate-limiting requests — try Read again in a minute" if code == 429 else f"HTTP {code}"
+            raise AIRouterError(f"{config.COMMERCIAL_PROVIDER} could not read the image: {why}. {body[:160]}".strip()) from exc
+        except httpx.HTTPError as exc:
+            if attempt < len(delays):
+                await asyncio.sleep(delays[attempt])
+                continue
+            raise AIRouterError(f"{config.COMMERCIAL_PROVIDER} could not read the image: {type(exc).__name__}: {str(exc)[:160]}") from exc

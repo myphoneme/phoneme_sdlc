@@ -284,3 +284,4 @@
 .bv-layout small { display: block; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--b-mut); }
 .bv-layout b { font-size: 12.5px; }
 .notice-inline.warn { display: block; } .notice-inline.warn svg { vertical-align: -2px; margin-right: 4px; }
+.bv-flow { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; } .bv-flow .bv-shotwrap.phone { max-width: 180px; }

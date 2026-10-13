@@ -442,7 +442,7 @@ async def blueprint_template(req: BlueprintTemplateRequest):
         old = state.brand.blueprint
         if old:  # keep the version history, module placement and the owner's designs
             bp.version, bp.module_slots = old.version, old.module_slots
-            bp.designs, bp.design_hints, bp.design_files = old.designs, old.design_hints, old.design_files
+            bp.designs, bp.design_hints, bp.design_files, bp.design_flows = old.designs, old.design_hints, old.design_files, old.design_flows
             bp.landing_copy = old.landing_copy
             if any(a.status != "ignored" for a in old.designs):  # the look was read off the owner's designs: a layout keeps it
                 bp.tokens = old.tokens
@@ -462,7 +462,7 @@ async def blueprint_save(req: BlueprintSaveRequest):
         old = state.brand.blueprint
         _guard(state, brand.blueprint_sections(old, bp))
         bp.version, bp.frozen, bp.frozen_at = (old.version if old else ""), False, ""
-        bp.designs, bp.design_hints, bp.design_files = (old.designs, old.design_hints, old.design_files) if old else ([], bp.design_hints, [])  # server-managed
+        bp.designs, bp.design_hints, bp.design_files, bp.design_flows = (old.designs, old.design_hints, old.design_files, old.design_flows) if old else ([], bp.design_hints, [], [])  # server-managed
         design_import.place(bp)
         state.brand.blueprint = bp
         await store.save_session(state)

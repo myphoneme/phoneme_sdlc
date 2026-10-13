@@ -30,7 +30,7 @@ from collections import Counter, deque
 from pathlib import Path
 
 from . import ai_router, blueprint, config, reqdoc, store
-from .models import DesignAsset, DesignFile, DesignHints, GenerationItem, GenerationProgress, Palette
+from .models import DesignAsset, DesignFile, DesignFlow, DesignHints, GenerationItem, GenerationProgress, LogoConcept, Palette
 
 logger = logging.getLogger("phoneme.design_import")
 
@@ -337,7 +337,9 @@ def fill_blueprint(bp, reads: list[dict]) -> None:
         if votes:
             colors[k] = votes.most_common(1)[0][0]
     n_p, n_w = len(phones), len(webs)
+    old = bp.design_hints
     bp.design_hints = DesignHints(
+        generate_ok=old.generate_ok, product_name=old.product_name, tagline=old.tagline, swatches=old.swatches,
         colors=colors, heading_font=bp.tokens.heading_font, body_font=bp.tokens.body_font,
         summary=f"Read {len(screens)} screen{'s' if len(screens) != 1 else ''} from your designs"
                 + (f": {n_p} phone" if n_p else ":") + (" and" if n_p and n_w else "") + (f" {n_w} web" if n_w else "") + ".")
@@ -409,14 +411,17 @@ async def start(session_id: str, files: list[tuple[str, bytes]]) -> None:
         records.append(f)
     new = []
     for name, img, idx in images:
-        for box in await split(img):
+        boxes = await split(img)
+        for n, box in enumerate(boxes, 1):
             if len(new) + len(bp.designs) >= MAX_SCREENS:
                 break
             crop = img.crop(box)
             did = uuid.uuid4().hex[:12]
             (d / f"{did}.png").write_bytes(png(crop, 1600))
             new.append(DesignAsset(design_id=did, original=name, width=crop.width, height=crop.height, status="unsure",
-                                   title=Path(name).stem[:60], file_id=records[idx].file_id))
+                                   title=Path(name).stem[:60], file_id=records[idx].file_id,
+                                   order=n if len(boxes) > 1 else 0,
+                                   box=[round(box[0] / img.width, 4), round(box[1] / img.height, 4), round(box[2] / img.width, 4), round(box[3] / img.height, 4)]))
             records[idx].screens += 1
     if not new:
         raise ValueError(f"at most {MAX_SCREENS} designs per product — remove some first")
@@ -441,7 +446,7 @@ def _now():
 
 async def _read_all(session_id: str, ids: list[str]) -> None:
     from PIL import Image
-    sem = asyncio.Semaphore(4)
+    sem = asyncio.Semaphore(2)  # gentle on the provider's rate limits
     state = await store.get_session(session_id)
     reads: dict[str, dict] = {}
     errors: dict[str, str] = {}
@@ -458,8 +463,15 @@ async def _read_all(session_id: str, ids: list[str]) -> None:
 
     state = await store.get_session(session_id)
     bp = state.brand.blueprint
+    boards = await _read_boards(state, ids, reads)
+    state = await store.get_session(session_id)
+    bp = state.brand.blueprint
     for a in bp.designs:
-        if a.design_id in reads:
+        if a.design_id in reads and a.confidence == -1:  # the owner already sorted it: keep that, refresh what was read
+            r = reads[a.design_id]
+            a.read = {k: r[k] for k in ("platform", "kind", "tab", "tabs", "nav", "landing_sections", "sign_in_methods", "register_fields", "copy",
+                                        "colors", "heading_font", "body_font", "radius", "density", "is_screen") if k in r}
+        elif a.design_id in reads:
             r = reads[a.design_id]
             a.platform = r.get("platform") if r.get("platform") in ("phone", "web") else ("phone" if a.height > a.width * 1.3 else "web")
             a.kind = r.get("kind") if r.get("kind") in KINDS else "other"
@@ -474,10 +486,13 @@ async def _read_all(session_id: str, ids: list[str]) -> None:
                 a.status = "ignored"
             a.read = {k: r[k] for k in ("platform", "kind", "tab", "tabs", "nav", "landing_sections", "sign_in_methods", "register_fields", "copy",
                                         "colors", "heading_font", "body_font", "radius", "density", "is_screen") if k in r}
-        elif a.design_id in errors:
+        elif a.design_id in errors and a.confidence != -1:
             a.platform = "phone" if a.height > a.width * 1.3 else "web"
-            a.description = "Could not be read automatically — sort it yourself."
+            busy = "rate-limit" in errors[a.design_id] or "429" in errors[a.design_id]
+            a.description = ("The AI service was busy — use Read again in a minute, or sort it yourself." if busy
+                             else "Could not be read automatically — sort it yourself.")
             a.confidence = 0.0
+    apply_boards(state, boards)
     if not bp.frozen:
         all_reads = [{**(reads.get(a.design_id) or a.read), "platform": a.platform, "kind": a.kind}
                      for a in bp.designs if (a.design_id in reads or a.read) and a.status != "ignored"]
@@ -487,9 +502,11 @@ async def _read_all(session_id: str, ids: list[str]) -> None:
     place(bp)
     offer_palette(state)
     g = state.design_import
+    covered = {a.design_id for a in state.brand.blueprint.designs if a.read}  # a board read can stand in for a failed screen read
     for it in g.items:
-        it.status = "failed" if it.req_id in errors else "done"
+        it.status = "failed" if it.req_id in errors and it.req_id not in covered else "done"
         it.error = errors.get(it.req_id, "")
+    errors = {k: v for k, v in errors.items() if k not in covered}
     g.done = len(g.items)
     g.status = "failed" if errors and len(errors) == len(g.items) else "done"
     g.updated_at = _now()
@@ -558,7 +575,7 @@ async def match(state) -> int:
     """Propose a module for every business screen the owner has not decided."""
     bp = state.brand.blueprint
     mods = [(m.module, _module_text(state, m)) for m in state.ui_modules if decidable(state, m)]
-    todo = [a for a in bp.designs if a.status == "business" and a.module_conf != -1 and not a.applied]
+    todo = [a for a in candidates(bp) if a.module_conf != -1 and not a.applied]
     if not todo or not mods:
         return 0
     for a in todo:
@@ -567,7 +584,7 @@ async def match(state) -> int:
     prompt = (
         f"Product: {state.selected_name}. The owner's own screen designs must be matched to the product's modules.\n\n"
         "Modules:\n" + "\n".join(f"- {n}: {t[:240]}" for n, t in mods) + "\n\nScreens:\n"
-        + "\n".join(f"- {a.design_id} ({a.platform}, {a.kind}{', tab ' + a.tab if a.tab else ''}): {a.title}. {a.description}" for a in todo)
+        + "\n".join(f"- {a.design_id} ({a.platform}, {a.kind}{', tab ' + a.tab if a.tab else ''}{', board label ' + a.caption if a.caption else ''}): {a.title}. {a.description}" for a in todo)
         + '\n\nMatch each screen to the ONE module it belongs to, or "" when it fits none. '
         'Answer JSON only: {"matches":[{"design_id":"..","module":"<exact module name or empty>","confidence":0.0-1.0}]}'
     )
@@ -589,6 +606,19 @@ async def match(state) -> int:
     return len(todo)
 
 
+FRAME_ONLY = {"landing", "sign_in", "sign_up", "onboarding"}  # these stay in the Identity frame / standard modules
+NONE = "__none__"  # the owner keeps a screen in the frame only
+
+
+def candidates(bp) -> list:
+    """Every uploaded screen that can become a module screen at UI/UX: the
+    business screens and the frame's tab / share screens (a complete mobile
+    flow goes in whole), in board order."""
+    flow_pos = {did: (fi, i) for fi, fl in enumerate(bp.design_flows) for i, did in enumerate(fl.design_ids)}
+    out = [a for a in bp.designs if a.status != "ignored" and a.kind not in FRAME_ONLY]
+    return sorted(out, key=lambda a: flow_pos.get(a.design_id, (99, a.order)))
+
+
 def assign(state, design_id: str, module: str) -> None:
     bp = state.brand.blueprint
     a = next((x for x in bp.designs if x.design_id == design_id), None)
@@ -596,7 +626,7 @@ def assign(state, design_id: str, module: str) -> None:
         raise KeyError("design not found")
     if a.applied:
         raise ValueError("this design is already inside a module -- remove that screen there first")
-    if module and not any(m.module == module and decidable(state, m) for m in state.ui_modules):
+    if module and module != NONE and not any(m.module == module and decidable(state, m) for m in state.ui_modules):
         raise ValueError("that module does not take designs")
     a.module, a.module_conf = module, -1.0
     if a.status == "ignored":
@@ -609,7 +639,7 @@ def module_board(state) -> dict:
     bp = state.brand.blueprint
     if not bp or not any(a.status != "ignored" for a in bp.designs):
         return {"active": False, "modules": [], "loose": [], "pending_apply": 0, "blocked": None}
-    live = [a for a in bp.designs if a.status == "business"]
+    live = candidates(bp)
     mods = []
     for m in state.ui_modules:
         if not decidable(state, m):
@@ -621,7 +651,9 @@ def module_board(state) -> dict:
                      "uploads": len(ups), "generate_ok": m.generate_ok,
                      "state": "yours" if (ups or mine) else ("generate" if m.generate_ok else "decide")})
     out = {"active": True, "modules": mods, "loose": [a.design_id for a in live if not a.module],
-           "pending_apply": sum(1 for a in live if a.module and not a.applied)}
+           "pending_apply": sum(1 for a in live if a.module and a.module != NONE and not a.applied),
+           "flows": [{"flow_id": fl.flow_id, "name": fl.name, "platform": fl.platform, "design_ids": [i for i in fl.design_ids if any(a.design_id == i for a in live)]}
+                     for fl in bp.design_flows]}
     out["blocked"] = _blocked(out)
     return out
 
@@ -729,7 +761,8 @@ def design_palette(state) -> Palette | None:
         return None
     px = pixel_palette([path_of(state.session_id, a.design_id) for a in live])
     seen = bp.design_hints.colors or {}
-    c = {k: seen.get(k) or px.get(k) for k in ("primary", "ink", "surface", "accent")}
+    chips = {x["role"]: x["hex"] for x in bp.design_hints.swatches if x.get("role")}  # colours printed on a board win
+    c = {k: chips.get(k) or seen.get(k) or px.get(k) for k in ("primary", "ink", "surface", "accent")}
     if not c["primary"]:
         return None
     from .brand import contrast, _mix
@@ -845,3 +878,154 @@ async def reread_file(session_id: str, file_id: str) -> None:
     t = asyncio.create_task(_read_all(session_id, ids))
     _tasks.add(t)
     t.add_done_callback(_tasks.discard)
+
+
+# ------------------------------------------------------------------ concept boards (2026-10-13)
+BOARD_PROMPT = """This image is a design concept board for the product "{name}". It shows {n} screen(s), numbered in reading order:
+{boxes}
+Read the board itself and return ONLY JSON:
+{{"product_name": "<the product name as written, or empty>", "tagline": "<the tagline as written, or empty>",
+ "logo": {{"x": 0.0, "y": 0.0, "w": 0.0, "h": 0.0}} or null  -- the brand logo (mark plus wordmark) as fractions of the image; null if there is none,
+ "swatches": [{{"name": "<label>", "hex": "#RRGGBB", "role": "primary|ink|surface|accent"}}]  -- colour chips printed on the board, if any,
+ "flow_name": "<what the screens are together, e.g. Mobile app flow>",
+ "screens": [{{"n": 1, "caption": "<the label printed above or below it, e.g. 01 · Home>", "title": "<short screen name>",
+   "platform": "phone|web", "kind": "landing|sign_in|sign_up|onboarding|home|list|detail|create|publish|settings|profile|share|other",
+   "tab": "<active bottom tab or menu item, or empty>", "tabs": ["<tab bar labels in order>"]}}]}}"""
+
+
+async def read_board(state, img, assets: list) -> dict:
+    boxes = "\n".join(f"{i}. x {a.box[0]:.2f}-{a.box[2]:.2f}, y {a.box[1]:.2f}-{a.box[3]:.2f}" if len(a.box) == 4 else f"{i}." for i, a in enumerate(assets, 1))
+    r = await ai_router.generate_vision(ai_router.Feature.DESIGN_VISION,
+                                        BOARD_PROMPT.format(name=state.selected_name or "the product", n=len(assets), boxes=boxes),
+                                        [("image/png", png(img, 2000))],
+                                        system="You are a senior product designer cataloguing a concept board. JSON only.")
+    d = reqdoc._extract_json(r["text"])
+    if not isinstance(d, dict):
+        raise ValueError("unreadable answer")
+    return d
+
+
+async def _read_boards(state, ids: list[str], reads: dict) -> list[tuple]:
+    """One extra read per board (a file split into several screens): the
+    logo, tagline, colour chips and the label of every screen, in order."""
+    from PIL import Image
+    bp = state.brand.blueprint
+    by_file = {}
+    for a in bp.designs:
+        if a.file_id and a.design_id in ids:
+            by_file.setdefault(a.file_id, [])
+    out = []
+    for f in bp.design_files:
+        if f.file_id not in by_file or f.ext == "zip":
+            continue
+        assets = sorted([a for a in bp.designs if a.file_id == f.file_id], key=lambda a: a.order)
+        if len(assets) < 2:
+            continue
+        try:
+            img = Image.open(source_path(state.session_id, f)).convert("RGB")
+            out.append((f, img, assets, await read_board(state, img, assets)))
+        except Exception as exc:  # noqa: BLE001 -- the screens still stand on their own reads
+            logger.warning("board %s could not be read: %s", f.name, exc)
+            out.append((f, None, assets, {}))
+    return out
+
+
+_CAPTION_NUM = re.compile(r"^\s*\d+\s*[·.:\-–—)]*\s*")
+
+
+def apply_boards(state, boards: list[tuple]) -> None:
+    b = state.brand
+    bp = b.blueprint
+    for f, img, assets, d in boards:
+        screens = {int(s.get("n", 0)): s for s in (d.get("screens") or []) if isinstance(s, dict) and str(s.get("n", "")).isdigit()}
+        for i, a in enumerate(assets, 1):
+            a = next(x for x in bp.designs if x.design_id == a.design_id)
+            s = screens.get(i) or {}
+            cap = str(s.get("caption") or "").strip()[:60]
+            if cap:
+                a.caption = cap
+            if a.confidence == -1:
+                continue
+            title = str(s.get("title") or "").strip() or _CAPTION_NUM.sub("", cap)
+            if title:
+                a.title = title[:60]
+            if not a.read and s:  # its own read failed: the board read stands in
+                a.platform = s.get("platform") if s.get("platform") in ("phone", "web") else a.platform
+                a.kind = s.get("kind") if s.get("kind") in KINDS else a.kind
+                a.tab = str(s.get("tab") or "")[:30]
+                a.read = {k: s[k] for k in ("platform", "kind", "tab", "tabs") if k in s}
+                if s.get("tabs"):
+                    a.read["nav"] = "tabs"
+                a.confidence = 0.6
+                a.description = f"Read from the board: {cap or title}."
+        plat = Counter(a.platform for a in assets).most_common(1)[0][0]
+        bp.design_flows = [x for x in bp.design_flows if x.file_id != f.file_id]
+        bp.design_flows.append(DesignFlow(flow_id=f.file_id, name=str(d.get("flow_name") or "").strip()[:60] or (("Mobile" if plat == "phone" else "Web") + f" flow · {f.name}")[:60],
+                                          platform=plat, file_id=f.file_id, design_ids=[a.design_id for a in assets]))
+        if not d:
+            continue
+        h = bp.design_hints
+        if d.get("product_name"):
+            h.product_name = str(d["product_name"]).strip()[:60]
+        if d.get("tagline"):
+            h.tagline = str(d["tagline"]).strip()[:80]
+        sw = [{"name": str(x.get("name") or "")[:30], "hex": _hex(x.get("hex")), "role": x.get("role") if x.get("role") in ("primary", "ink", "surface", "accent") else ""}
+              for x in (d.get("swatches") or []) if isinstance(x, dict) and _hex(x.get("hex"))]
+        if sw:
+            h.swatches = sw[:8]
+        lg = d.get("logo")
+        if img is not None and isinstance(lg, dict):
+            try:
+                x, y, w, hh = (float(lg.get(k, 0)) for k in ("x", "y", "w", "h"))
+                if 0.01 < w <= 1 and 0.01 < hh <= 1:
+                    pad = 0.01
+                    box = (max(0, int((x - pad) * img.width)), max(0, int((y - pad) * img.height)),
+                           min(img.width, int((x + w + pad) * img.width)), min(img.height, int((y + hh + pad) * img.height)))
+                    _offer_logo(state, img.crop(box))
+            except (TypeError, ValueError):
+                pass
+    if any(d for *_, d in boards):
+        _offer_tagline(state)
+
+
+def _offer_logo(state, crop) -> None:
+    import base64
+    from . import brand
+    crop = crop.convert("RGBA")  # the board's background around the logo becomes transparent
+    bg = crop.getpixel((0, 0))
+    px = crop.load()
+    for yy in range(crop.height):
+        for xx in range(crop.width):
+            p = px[xx, yy]
+            if abs(p[0] - bg[0]) + abs(p[1] - bg[1]) + abs(p[2] - bg[2]) < 30:
+                px[xx, yy] = (p[0], p[1], p[2], 0)
+    data = png(crop, 640)
+    w, h = crop.size
+    s = 640 / max(w, h) if max(w, h) > 640 else 1
+    w, h = int(w * s), int(h * s)
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 {w} {h}">'
+           f'<image width="{w}" height="{h}" href="data:image/png;base64,{base64.b64encode(data).decode()}"/></svg>')
+    b = state.brand
+    logo = LogoConcept(id="from-designs", concept="From your designs", svg=svg)
+    b.logo_options = [logo] + [x for x in b.logo_options if x.id != "from-designs"]
+    try:
+        brand.check_edit(state, "logo")
+    except ValueError:
+        return
+    if not b.logo or b.logo.id == "from-designs" or b.sections.get("logo") != "frozen":
+        b.logo = logo
+
+
+def _offer_tagline(state) -> None:
+    from . import brand
+    b = state.brand
+    t = b.blueprint.design_hints.tagline if b.blueprint else ""
+    if not t:
+        return
+    b.tagline_options = [t] + [x for x in b.tagline_options if x != t]
+    try:
+        brand.check_edit(state, "name")
+    except ValueError:
+        return
+    if not b.tagline:
+        b.tagline = t

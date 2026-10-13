@@ -23,13 +23,22 @@ export default function DesignMatch({ session, setSession }) {
     try { setSession(await fn()); } catch (e) { setError(e.message); } finally { setBusy(""); }
   }
   const mods = board.modules;
-  const live = designs.filter((d) => d.status === "business");
+  // every uploaded screen that can become a module screen -- business screens and the frame's tab/share screens,
+  // a board's screens in board order (a complete mobile flow goes in whole)
+  const FRAME_ONLY = ["landing", "sign_in", "sign_up", "onboarding"];
+  const flowPos = {};
+  (board?.flows || []).forEach((f, fi) => f.design_ids.forEach((id, i) => { flowPos[id] = fi * 100 + i; }));
+  const live = designs.filter((d) => d.status !== "ignored" && !FRAME_ONLY.includes(d.kind))
+    .sort((a, b) => (flowPos[a.design_id] ?? 9999 + a.order) - (flowPos[b.design_id] ?? 9999 + b.order));
+  const inFlow = new Set(Object.keys(flowPos));
+  const loose = live.filter((d) => !inFlow.has(d.design_id));
   const unmatchedAI = live.some((d) => !d.module && !d.applied && d.module_conf === 0);
   const thumb = (id, cls = "") => <span className={`di-thumb sm ${byId[id]?.platform} ${cls}`}><img src={fileUrl(`/identity/${sid}/designs/file/${id}`)} alt={byId[id]?.title || "Your design"} loading="lazy" /></span>;
   const pick = (d) => (
     <select aria-label={`Module for ${d.title}`} value={d.module} disabled={!!busy || !!d.applied}
       onChange={(e) => run("Saving…", () => api.assignDesign(sid, d.design_id, e.target.value))}>
       <option value="">— not matched —</option>
+      <option value="__none__">Keep in the frame only</option>
       {mods.map((m) => <option key={m.ui_id} value={m.module}>{m.module}</option>)}
     </select>
   );
@@ -49,15 +58,47 @@ export default function DesignMatch({ session, setSession }) {
       {busy && <p className="muted small">{busy}</p>}
       {error && <div className="error-banner" role="alert">{error}</div>}
 
-      {live.length > 0 && (
-        <div className="di-grid">
-          {live.map((d) => (
+      {(board?.flows || []).filter((f) => f.design_ids.length).map((f) => (
+        <div key={f.flow_id} className="dm-flow">
+          <div className="dm-flow-head">
+            <h4 className="mini-head">{f.name} · {f.design_ids.length} screens, in order</h4>
+            <select aria-label={`Put all of ${f.name} into one module`} value="" disabled={!!busy}
+              onChange={(e) => { const mod = e.target.value; if (!mod) return; run("Assigning the flow…", async () => {
+                let st = null;
+                for (const id of f.design_ids) { const d = live.find((x) => x.design_id === id); if (d && !d.applied) st = await api.assignDesign(sid, id, mod); }
+                return st || session;
+              }); }}>
+              <option value="">Put the whole flow into…</option>
+              {mods.map((m) => <option key={m.ui_id} value={m.module}>{m.module}</option>)}
+            </select>
+          </div>
+          <p className="muted small">The whole flow from your board becomes {f.platform === "phone" ? "mobile" : "web"} design snapshots in UI/UX — each screen inside the module it belongs to, in this order.</p>
+          <div className="di-grid">{f.design_ids.map((id) => live.find((d) => d.design_id === id)).filter(Boolean).map((d) => (
             <div key={d.design_id} className={"di-card" + (!d.module && !d.applied ? " unsure" : "")}>
               {thumb(d.design_id)}
               <div>
                 <strong>{d.title || "Screen"}</strong>
-                <small>{d.platform}{d.tab ? ` · ${d.tab}` : ""}</small>
+                <small>{d.caption ? `${d.caption} · ` : ""}{d.platform}{d.tab ? ` · ${d.tab}` : ""}</small>
                 {d.applied ? <span className="chip good"><CheckCircle2 size={11} /> In {d.module}</span>
+                  : d.module === "__none__" ? <span className="chip">Frame only</span>
+                  : d.module ? (d.module_conf === -1 ? <span className="chip good">Your choice</span> : <span className={"chip" + (d.module_conf < 0.55 ? " warn" : "")}><CircleHelp size={11} /> {d.module_conf < 0.55 ? "Check this" : "Proposed"}</span>)
+                  : <span className="chip warn"><CircleHelp size={11} /> Not matched</span>}
+                <div className="di-acts">{pick(d)}</div>
+              </div>
+            </div>
+          ))}</div>
+        </div>
+      ))}
+      {loose.length > 0 && (
+        <div className="di-grid">
+          {loose.map((d) => (
+            <div key={d.design_id} className={"di-card" + (!d.module && !d.applied ? " unsure" : "")}>
+              {thumb(d.design_id)}
+              <div>
+                <strong>{d.title || "Screen"}</strong>
+                <small>{d.caption ? `${d.caption} · ` : ""}{d.platform}{d.tab ? ` · ${d.tab}` : ""}</small>
+                {d.applied ? <span className="chip good"><CheckCircle2 size={11} /> In {d.module}</span>
+                  : d.module === "__none__" ? <span className="chip">Frame only</span>
                   : d.module ? (d.module_conf === -1 ? <span className="chip good">Your choice</span> : <span className={"chip" + (d.module_conf < 0.55 ? " warn" : "")}><CircleHelp size={11} /> {d.module_conf < 0.55 ? "Check this" : "Proposed"}</span>)
                   : <span className="chip warn"><CircleHelp size={11} /> Not matched</span>}
                 <div className="di-acts">{pick(d)}</div>

@@ -120,6 +120,12 @@ async def fake_vision(feature, prompt, images, system=None):
     vision_calls.append(im.size)
     if "mockup board" in prompt:
         return {"text": '{"screens": []}'}
+    if "concept board" in prompt:
+        return {"text": json.dumps({"product_name": "RelayREEL", "tagline": "Save inspiration. Shape your story.",
+            "logo": {"x": 0.0, "y": 0.0, "w": 0.06, "h": 0.06},
+            "swatches": [{"name": "Coral", "hex": "#FF6254", "role": "primary"}, {"name": "Ink", "hex": "#15151B", "role": "ink"}, {"name": "x", "hex": "nope"}],
+            "flow_name": "Mobile app flow",
+            "screens": [{"n": 1, "caption": "01 · Home", "title": "Home"}, {"n": 2, "caption": "02 · Library"}, {"n": 3, "caption": "03 · Share capture", "title": "Share capture"}]})}
     px = im.resize((1, 1)).getpixel((0, 0)) if False else im.getpixel((im.width // 2, im.height // 2))
     key = min(VISION, key=lambda k: sum(abs(a - b) for a, b in zip(k, px)))
     d = {"is_screen": True, "confidence": 0.9, "colors": {"primary": "#ff6254", "ink": "#15151B", "surface": "#FAF9F6", "accent": "nope"},
@@ -218,6 +224,13 @@ async def run():
         st = {x["slot"]: x["status"] for x in cov["slots"]}
         assert st["landing"] == "placed" and st["sign_in"] == "unsure" and st["tab:Home"] == "placed" and st["tab:Library"] == "placed" and st["share"] == "placed", st
         assert st["tab:Create"] == "generate" and st["sign_up"] == "generate" and not cov["palette_differs"], cov
+        # the board itself: logo, tagline, colour chips, labels and the flow (2026-10-13)
+        bpb = s["brand"]["blueprint"]; brd = sorted([d for d in bpb["designs"] if d["original"] == "relayreel-board.png"], key=lambda d: d["order"])
+        assert [d["caption"] for d in brd] == ["01 · Home", "02 · Library", "03 · Share capture"] and [d["title"] for d in brd] == ["Home", "Library", "Share capture"], brd
+        assert bpb["design_flows"] and bpb["design_flows"][0]["name"] == "Mobile app flow" and bpb["design_flows"][0]["design_ids"] == [d["design_id"] for d in brd], bpb["design_flows"]
+        assert bpb["design_hints"]["tagline"] == "Save inspiration. Shape your story." and s["brand"]["tagline_options"][0] == "Save inspiration. Shape your story."
+        assert s["brand"]["logo"]["id"] == "from-designs" and "data:image/png;base64," in s["brand"]["logo"]["svg"], s["brand"]["logo"]["id"]
+        assert [x["role"] for x in bpb["design_hints"]["swatches"]] == ["primary", "ink"]
         # colours come from the designs by default (2026-10-13)
         assert s["brand"]["palette"]["name"] == "From your designs" and s["brand"]["palette"]["primary"] == "#FF6254", s["brand"]["palette"]
         assert s["brand"]["palette_options"][0]["name"] == "From your designs"
@@ -565,6 +578,9 @@ async def run():
         await post("/api/uiux/designs/match", {"session_id": sid})
         dm = {d["design_id"]: d for d in (await c.get(f"/api/discovery/{sid}")).json()["brand"]["blueprint"]["designs"]}
         assert dm[lst["design_id"]]["module"] == "Repurpose Studio" and dm[hom["design_id"]]["module"] == "" , dm
+        shr = next(d for d in dm.values() if d["kind"] == "share")
+        b = (await c.get(f"/api/uiux/{sid}/designs")).json(); assert set(b["loose"]) == {hom["design_id"], shr["design_id"]} and b["flows"] and b["flows"][0]["name"] == "Mobile app flow", b
+        await post("/api/uiux/designs/assign", {"session_id": sid, "design_id": shr["design_id"], "module": "__none__"})   # stays in the frame only
         b = (await c.get(f"/api/uiux/{sid}/designs")).json(); assert b["loose"] == [hom["design_id"]] and "not matched" in b["blocked"], b
         await post("/api/uiux/designs/assign", {"session_id": sid, "design_id": hom["design_id"], "module": "Nowhere"}, 400)
         await post("/api/uiux/designs/assign", {"session_id": sid, "design_id": hom["design_id"], "module": "Capture & Catalogue"})

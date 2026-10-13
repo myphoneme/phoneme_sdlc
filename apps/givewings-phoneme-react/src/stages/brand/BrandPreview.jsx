@@ -216,8 +216,19 @@ function MobilePreview({ session, bp, asset }) {
   const share = inSlot(bp, "share");
   const phones = (bp?.designs || []).filter((d) => d.platform === "phone" && d.status !== "ignored");
   const loose = phones.filter((d) => !d.slot);
+  const flows = (bp?.design_flows || []).filter((f) => f.platform === "phone");
+  const byId = Object.fromEntries((bp?.designs || []).map((d) => [d.design_id, d]));
   return (
     <>
+      {flows.map((f) => (
+        <div key={f.flow_id} className="bv-gal">
+          <h6 className="bv-h6">{f.name} — your complete flow, in order</h6>
+          <div className="bv-flow">{f.design_ids.map((id) => byId[id]).filter(Boolean).map((d, i) => (
+            <figure key={d.design_id}><Shot d={d} asset={asset} phone /><figcaption>{d.caption || `${String(i + 1).padStart(2, "0")} · ${d.title}`}</figcaption></figure>
+          ))}</div>
+        </div>
+      ))}
+      {flows.length > 0 && <h6 className="bv-h6">Phone app frame — tabs and share sheet</h6>}
       {webOnly && phones.length > 0 && <p className="bv-warn">The layout is web only — your {phones.length} phone screen{phones.length > 1 ? "s are" : " is"} shown here but not placed. Add the phone app to put them in its tabs.</p>}
       {webOnly ? (
         <div className="bv-phones">{phones.map((d) => <figure key={d.design_id}><Shot d={d} asset={asset} phone /><figcaption>{d.title}</figcaption></figure>)}</div>

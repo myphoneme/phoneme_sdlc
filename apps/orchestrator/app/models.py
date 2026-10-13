@@ -170,6 +170,9 @@ class DesignAsset(BaseModel):
     width: int = 0
     height: int = 0
     file_id: str = ""        # the uploaded file it came from (2026-10-13)
+    order: int = 0           # position on its board (1, 2 ...) -- a board's screens in order are a flow
+    box: list[float] = []    # where it sits on the board, as fractions x0, y0, x1, y1
+    caption: str = ""        # the label printed on the board above it ("01 · Home")
     read: dict = {}          # what the AI read off it (kept so later uploads re-fill the blueprint from all screens)
     module: str = ""         # UI/UX module this screen was matched to (step 2)
     module_conf: float = 0.0  # AI match confidence; -1 = decided by the owner
@@ -187,6 +190,15 @@ class DesignFile(BaseModel):
     screens: int = 0
 
 
+class DesignFlow(BaseModel):
+    """2026-10-13: the screens of one board, in order -- e.g. a complete mobile flow."""
+    flow_id: str
+    name: str = ""
+    platform: str = "phone"
+    file_id: str = ""
+    design_ids: list[str] = []
+
+
 class DesignHints(BaseModel):
     """What the AI read off the owner's designs (applied on request)."""
     colors: dict[str, str] = {}   # primary, ink, surface, accent
@@ -194,6 +206,9 @@ class DesignHints(BaseModel):
     body_font: str = ""
     summary: str = ""
     generate_ok: bool = False  # the owner agreed that empty places in the frame are generated in their style
+    product_name: str = ""     # read off a concept board (2026-10-13)
+    tagline: str = ""
+    swatches: list[dict] = []  # [{"name", "hex", "role"}] printed on a board
 
 
 class ExperienceBlueprint(BaseModel):
@@ -217,7 +232,8 @@ class ExperienceBlueprint(BaseModel):
     frozen: bool = False
     frozen_at: str = ""
     designs: list[DesignAsset] = []
-    design_files: list[DesignFile] = []   # the owner's own designs (server-managed)
+    design_files: list[DesignFile] = []
+    design_flows: list[DesignFlow] = []   # the owner's own designs (server-managed)
     design_hints: DesignHints = DesignHints()
 
 
