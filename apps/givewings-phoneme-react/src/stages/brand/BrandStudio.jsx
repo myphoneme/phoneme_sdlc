@@ -8,10 +8,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowRight, Check, CircleDashed, ExternalLink, GitPullRequest, Globe, ImageUp, LayoutTemplate, Lock, LockOpen,
-  Moon, Palette as PaletteIcon, Shapes, ShieldCheck, Smartphone, Sun, Type, Undo2, X,
+  Moon, Palette as PaletteIcon, Sparkles, Shapes, ShieldCheck, Smartphone, Sun, Type, Undo2, X,
 } from "lucide-react";
 import { api, fileUrl } from "../../api.js";
 import DesignImport from "../DesignImport.jsx";
+import AssistModal from "./AssistModal.jsx";
 import BrandPreview from "./BrandPreview.jsx";
 import { ColoursSection, LandingSection, LogoSection, MobileSection, NameSection, PRESETS, ThemeSection, WebSection } from "./sections.jsx";
 import "./brand.css";
@@ -87,7 +88,8 @@ export default function BrandStudio({ session, setSession }) {
   const [device, setDevice] = useState("web");
   const [askChange, setAskChange] = useState(false);
   const pvRef = useRef(null);
-  useEffect(() => { if (pvRef.current) pvRef.current.scrollTop = 0; }, [active]);
+  const [assistOpen, setAssistOpen] = useState(false);
+  useEffect(() => { if (pvRef.current) pvRef.current.scrollTop = 0; setAssistOpen(false); }, [active]);
   const [nameDraft, setNameDraft] = useState(null); // typed but not yet saved: shown live in the preview
 
   const sig = JSON.stringify([b.sections, b.change?.sections, b.version, b.completed, b.palette, b.logo?.id, b.tagline, session.selected_name,
@@ -158,7 +160,7 @@ export default function BrandStudio({ session, setSession }) {
       case "theme": return <ThemeSection {...common} locked={locked("theme")} bp={bp} set={setBp} cat={cat} suggested={suggested} placementLocked={locked("theme")} />;
       case "landing": return <LandingSection {...common} locked={locked("landing")} bp={bp} set={setBp} cat={cat} />;
       case "web": return <WebSection {...common} locked={locked("web")} bp={bp} set={setBp} />;
-      case "mobile": return <MobileSection {...common} locked={locked("mobile")} bp={bp} set={setBp} />;
+      case "mobile": return <MobileSection {...common} locked={locked("mobile") && sections.find((x) => x.key === "mobile")?.status !== "na"} bp={bp} set={setBp} />;
       case "standard": return (
         <div className="bs-fields">
           <p>These modules ship with every product and are <b>never designed per product</b>. They inherit your colours (light and dark), type, corners and logo — nothing else to decide here.</p>
@@ -237,6 +239,9 @@ export default function BrandStudio({ session, setSession }) {
         <section className="bs-editor">
           <div className="bs-ed-head">
             <div><h3>{title}</h3><p className="muted small">{hint}</p></div>
+            {active !== "designs" && (active === "standard" ? !locked("theme") : META[active] && sec?.status !== "na" && !lr) && (
+              <button type="button" className="btn-secondary sm bs-ask" onClick={() => setAssistOpen((v) => !v)}><Sparkles size={13} /> Ask AI</button>
+            )}
             {META[active] && sec && sec.status !== "na" && !identityFrozen && (
               sec.status === "frozen"
                 ? (!change || change.sections.includes(active)) && <button type="button" className="btn-secondary sm" disabled={!!busy} onClick={() => freezeSection(active, "unfreeze")}><LockOpen size={13} /> Unfreeze</button>
@@ -244,6 +249,7 @@ export default function BrandStudio({ session, setSession }) {
             )}
           </div>
           {lr && <p className="notice-inline"><Lock size={13} /> {lr}</p>}
+          {assistOpen && <AssistModal session={session} setSession={setSession} section={active} label={title} onClose={() => setAssistOpen(false)} />}
           {editor}
           {nextKey && <div className="bs-next"><button type="button" className="link-btn" onClick={() => setActive(nextKey)}>Next: {nextKey === "standard" ? "Standard modules" : sections.find((s) => s.key === nextKey)?.label} <ArrowRight size={13} /></button></div>}
         </section>

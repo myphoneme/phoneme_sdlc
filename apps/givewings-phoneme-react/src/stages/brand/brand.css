@@ -243,3 +243,44 @@
 .bv-gal { display: flex; flex-direction: column; gap: 8px; }
 .bv-note { margin: 8px 2px 0; font-size: 12px; color: #6b6f76; }
 .bs-editor .di-consent { flex-wrap: wrap; } .bs-editor .di-consent > div { min-width: 200px; }
+/* review round 2 (2026-10-13) */
+.bs-explain { margin: -4px 0 2px; }
+.bs-detected { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; padding: 10px 12px; border: 1px solid #bfe3cc; background: #f1faf4; border-radius: 10px; }
+.bs-detected b { display: block; font-size: 13.5px; }
+.bs-detected small { color: #4d6b57; font-size: 12px; }
+.bp-template.sm { cursor: pointer; text-align: left; }
+.bs-tpl-meta { color: #8a6b52 !important; font-weight: 700; margin-top: 4px; display: block; }
+.bs-confirm { display: block; margin-top: 6px; padding: 6px 8px; border-radius: 8px; background: #fff3e6; color: #8a3b0c; font-size: 12px; }
+.bs-sec-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.bs-sec-name small { font-size: 12px; color: #8c8f94; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bs-sec-name small.own { color: #146c3a; }
+.bs-sec-name .link-btn { align-self: flex-start; font-size: 12px; padding: 0; }
+.bp-sec.open { flex-wrap: wrap; }
+.bs-copy { flex-basis: 100%; display: grid; gap: 6px; padding-top: 8px; }
+.bs-copy label { display: grid; gap: 3px; font-size: 12px; font-weight: 700; color: #6b5a4c; }
+.bs-copy input, .bs-copy textarea { font: inherit; font-size: 13px; font-weight: 400; padding: 6px 8px; border: 1px solid #e3ddd6; border-radius: 8px; }
+.notice-inline.warn { background: #fffaf0; border: 1px solid #f3c27a; color: #6a4a12; padding: 8px 10px; border-radius: 10px; }
+.bs-ask { margin-left: auto; }
+.bs-ed-head { flex-wrap: wrap; }
+.bs-assist { border: 1px solid #e7c9b3; border-radius: 12px; background: #fffaf6; box-shadow: 0 10px 30px #8a3b0c1a; display: flex; flex-direction: column; overflow: hidden; }
+.bs-assist-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: #fff; border-bottom: 1px solid #f0e2d6; color: #8a3b0c; }
+.bs-assist-head strong { flex: 1; color: #26282c; font-size: 13.5px; }
+.bs-assist-body { max-height: 260px; overflow: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.bs-msg { max-width: 88%; padding: 8px 10px; border-radius: 12px; font-size: 13px; }
+.bs-msg p { margin: 0; }
+.bs-msg.owner { align-self: flex-end; background: #26282c; color: #fff; border-bottom-right-radius: 4px; }
+.bs-msg.ai { align-self: flex-start; background: #fff; border: 1px solid #f0e2d6; border-bottom-left-radius: 4px; }
+.bs-applied { margin: 6px 0 0; padding-left: 16px; font-size: 12px; color: #146c3a; }
+.bs-assist-ideas { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+.bs-assist-input { border-top: 1px solid #f0e2d6; padding: 8px 12px; display: grid; gap: 6px; background: #fff; }
+.bs-assist-input textarea { width: 100%; font: inherit; font-size: 13px; padding: 7px 9px; border: 1px solid #e3ddd6; border-radius: 9px; resize: vertical; }
+.bs-assist-acts { display: flex; justify-content: flex-end; gap: 6px; }
+.bv-shotwrap.tall { max-height: 70vh; overflow: auto; }
+.bv-open { position: absolute; right: 8px; top: 8px; padding: 2px 8px; border-radius: 999px; background: #fff; color: #8a3b0c; font-size: 11px; font-weight: 800; box-shadow: 0 2px 6px #0002; }
+.bv-warn { margin: 0; padding: 8px 10px; border-radius: 10px; background: #fffaf0; border: 1px solid #f3c27a; color: #6a4a12; font-size: 12.5px; }
+.bv-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bv-layout > div { border: 1px solid var(--b-line); border-radius: 10px; padding: 8px 10px; background: var(--b-tint); }
+.bv-layout .wide { grid-column: 1 / -1; }
+.bv-layout small { display: block; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--b-mut); }
+.bv-layout b { font-size: 12.5px; }
+.notice-inline.warn { display: block; } .notice-inline.warn svg { vertical-align: -2px; margin-right: 4px; }

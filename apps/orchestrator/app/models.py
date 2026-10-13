@@ -207,6 +207,7 @@ class ExperienceBlueprint(BaseModel):
     public_pages: list[str] = []  # Landing, Pricing, About, Blog, Contact, Download app
     landing_sections: list[str] = []  # hero, promise, features, download, pricing, faq, cta (in order)
     public_features: str = ""  # what visitors may use without signing in
+    landing_copy: dict[str, dict] = {}  # section -> {"title", "text", "items"}: read off the owner's landing design, or written with AI
     auth: AuthSpec = AuthSpec()
     web: WebShell = WebShell()
     mobile: MobileShell = MobileShell()
@@ -261,6 +262,7 @@ class BrandIdentity(BaseModel):
     frozen_at: str = ""
     change: Optional[IdentityChange] = None
     history: list[IdentityVersion] = []
+    assist: dict[str, list[dict]] = {}  # section -> AI assistant conversation (2026-10-13)
 
 
 class GenerationItem(BaseModel):
@@ -759,6 +761,12 @@ class DesignConsentRequest(BaseModel):
     session_id: str
     ui_id: str = ""    # a UI/UX module; empty = the Identity frame
     ok: bool = True
+
+
+class AssistRequest(BaseModel):
+    session_id: str
+    section: str
+    message: str = ""
 
 
 class DesignFileRequest(BaseModel):

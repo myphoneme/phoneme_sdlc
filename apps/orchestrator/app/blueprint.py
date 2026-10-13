@@ -154,7 +154,7 @@ def normalise(bp: ExperienceBlueprint) -> ExperienceBlueprint:
     secs = [s for s in dict.fromkeys(bp.landing_sections) if s in SECTIONS]
     if bp.platforms == "web":
         secs = [s for s in secs if s != "download"]
-    bp.landing_sections = (["hero"] if "hero" not in secs else []) + secs
+    bp.landing_sections = ["hero"] + [x for x in secs if x != "hero"]  # the hero always opens the page
     pages = [p for p in dict.fromkeys(bp.public_pages) if p in PAGES]
     if bp.platforms == "web":
         pages = [p for p in pages if p != "Download app"]
@@ -170,7 +170,21 @@ def normalise(bp: ExperienceBlueprint) -> ExperienceBlueprint:
         bp.mobile.tabs = [t.strip()[:18] for t in bp.mobile.tabs if t.strip()][:5] or ["Home", "Search", "Profile"]
     bp.public_features = bp.public_features.strip()[:300]
     bp.notes = bp.notes.strip()[:600]
+    bp.landing_copy = clean_copy(bp.landing_copy)
     return bp
+
+
+def clean_copy(copy) -> dict:
+    """Landing copy per section: short title, text, up to 6 items."""
+    out = {}
+    for k, v in (copy or {}).items():
+        if k not in SECTIONS or not isinstance(v, dict):
+            continue
+        c = {"title": str(v.get("title") or "").strip()[:120], "text": str(v.get("text") or "").strip()[:400],
+             "items": [str(i).strip()[:120] for i in (v.get("items") or []) if str(i).strip()][:6]}
+        if c["title"] or c["text"] or c["items"]:
+            out[k] = c
+    return out
 
 
 def freeze(bp: ExperienceBlueprint, previous: str = "") -> ExperienceBlueprint:

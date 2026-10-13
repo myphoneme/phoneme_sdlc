@@ -196,19 +196,31 @@ export function LogoSection({ session, run, busy, locked, favicon }) {
 /* ---------- 4. Brand theme + standard modules ---------- */
 export function ThemeSection({ session, run, busy, locked, bp, set, cat, suggested, placementLocked }) {
   const sid = session.session_id;
+  const [pending, setPending] = useState("");
+  const hasDesigns = (bp?.designs || []).some((d) => d.status !== "ignored");
   const fonts = cat?.fonts || [];
   const methods = cat?.auth_methods || {};
   const toggle = (path, arr, item) => set(path, arr.includes(item) ? arr.filter((x) => x !== item) : [...arr, item]);
   return (
     <fieldset className="bs-fields" disabled={locked || busy}>
-      <label className="bs-label">Starting point</label>
+      <label className="bs-label">Product layout</label>
+      <p className="muted small bs-explain">A layout is a ready-made <b>structure</b>: where the product runs (web, phone or both), the landing page sections, the web menu and the phone tabs. Picking one replaces those — your colours, fonts, landing text and uploaded designs stay.</p>
+      {hasDesigns && (
+        <div className={"bs-detected" + (bp?.template_key ? "" : " on")}>
+          <div><b>From your designs</b><small>{bp?.design_hints?.summary || "The structure read off your uploads"}</small></div>
+          <button type="button" className="btn-secondary sm" onClick={() => run("Using what was read from your designs…", () => api.refillFromDesigns(sid))}>Use the layout from my designs</button>
+        </div>
+      )}
       <div className="bs-templates">
         {(cat?.templates || []).map((t) => (
-          <button key={t.key} type="button" className={"bp-template sm" + (bp?.template_key === t.key ? " selected" : "")}
-            onClick={() => run("Applying starting point…", () => api.blueprintTemplate(sid, t.key))}>
+          <div key={t.key} className={"bp-template sm" + (bp?.template_key === t.key ? " selected" : "")} role="button" tabIndex={0}
+            onClick={() => (hasDesigns && pending !== t.key ? setPending(t.key) : (setPending(""), run("Applying layout…", () => api.blueprintTemplate(sid, t.key))))}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.click()}>
             <span className="bp-template-top"><strong>{t.name}</strong>{t.key === suggested && <span className="chip accent"><Sparkles size={11} /> Fits</span>}</span>
             <small>{t.summary}</small>
-          </button>
+            <small className="bs-tpl-meta">{t.platforms === "both" ? `Web + phone (${t.primary} first)` : t.platforms === "mobile" ? "Phone app" : "Web only"}</small>
+            {pending === t.key && <span className="bs-confirm">Replace the layout read from your designs? <b>Click again to use {t.name}</b></span>}
+          </div>
         ))}
       </div>
       {bp && <>
@@ -243,7 +255,10 @@ export function ThemeSection({ session, run, busy, locked, bp, set, cat, suggest
 
 /* ---------- 5. Marketing landing page ---------- */
 export function LandingSection({ busy, locked, bp, set, cat }) {
+  const [open, setOpen] = useState("");
   if (!bp) return <p className="muted">Choose a starting point in Brand theme first.</p>;
+  const copy = bp.landing_copy || {};
+  const setCopy = (k, field, v) => set("landing_copy", { ...copy, [k]: { title: "", text: "", items: [], ...(copy[k] || {}), [field]: v } });
   const sections = cat?.sections || [];
   const toggle = (path, arr, item) => set(path, arr.includes(item) ? arr.filter((x) => x !== item) : [...arr, item]);
   const move = (i, dd) => { const a = [...bp.landing_sections]; const j = i + dd; if (j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; set("landing_sections", a); };
@@ -252,13 +267,24 @@ export function LandingSection({ busy, locked, bp, set, cat }) {
       <label className="bs-label">Sections, top to bottom</label>
       <div className="bp-sections">
         {bp.landing_sections.map((k, i) => (
-          <div key={k} className="bp-sec">
-            <span>{i + 1}. {LANDING_LABEL[k] || k}</span>
+          <div key={k} className={"bp-sec" + (open === k ? " open" : "")}>
+            <span className="bs-sec-name">{i + 1}. {LANDING_LABEL[k] || k}
+              <small className={copy[k]?.title ? "own" : ""}>{copy[k]?.title ? `“${copy[k].title}”` : "General text — edit it or Ask AI"}</small>
+              <button type="button" className="link-btn" onClick={() => setOpen(open === k ? "" : k)}>{open === k ? "Done" : "Edit text"}</button>
+            </span>
             <span className="bp-sec-act">
               <button type="button" className="icon-btn" aria-label="Move up" onClick={() => move(i, -1)} disabled={i === 0}><ArrowUp size={14} /></button>
               <button type="button" className="icon-btn" aria-label="Move down" onClick={() => move(i, 1)} disabled={i === bp.landing_sections.length - 1}><ArrowDown size={14} /></button>
               {k !== "hero" && <button type="button" className="link-btn" onClick={() => toggle("landing_sections", bp.landing_sections, k)}>Remove</button>}
             </span>
+            {open === k && (
+              <div className="bs-copy">
+                <label>Heading <input value={copy[k]?.title || ""} onChange={(e) => setCopy(k, "title", e.target.value)} /></label>
+                <label>Text <textarea rows={2} value={copy[k]?.text || ""} onChange={(e) => setCopy(k, "text", e.target.value)} /></label>
+                <label>{k === "hero" ? "Buttons" : k === "faq" ? "Questions" : k === "pricing" ? "Plans" : "Items"} (comma separated)
+                  <CommaInput value={copy[k]?.items || []} max={6} onChange={(v) => setCopy(k, "items", v)} /></label>
+              </div>
+            )}
           </div>
         ))}
         <div className="bp-checks">{sections.filter((k) => !bp.landing_sections.includes(k) && (bp.platforms !== "web" || k !== "download")).map((k) => (
@@ -289,9 +315,20 @@ export function WebSection({ busy, locked, bp, set }) {
 }
 
 /* ---------- 7. Mobile pages theme ---------- */
-export function MobileSection({ busy, locked, bp, set }) {
+export function MobileSection({ busy, locked, bp, set, session, run }) {
   if (!bp) return <p className="muted">Choose a starting point in Brand theme first.</p>;
-  if (bp.platforms === "web") return <p className="muted"><Smartphone size={14} /> This product is web-only. Switch “Where it runs” in Brand theme to add a phone app.</p>;
+  if (bp.platforms === "web") {
+    const phones = (bp.designs || []).filter((d) => d.platform === "phone" && d.status !== "ignored").length;
+    return (
+      <div className="bs-fields">
+        <p className={phones ? "notice-inline warn" : "muted"}><Smartphone size={14} /> The layout is <b>web only</b>{phones ? `, but you uploaded ${phones} phone screen${phones > 1 ? "s" : ""}. They are shown on the right; add the phone app to place them in its tabs.` : ". Add the phone app if people should use it on their phones."}</p>
+        {!locked && <div className="bp-row">
+          <button type="button" className="btn-primary sm" disabled={busy} onClick={() => set("platforms", "both")}>Add the phone app</button>
+          {phones > 0 && <button type="button" className="btn-secondary sm" disabled={busy} onClick={() => run("Using what was read from your designs…", () => api.refillFromDesigns(session.session_id))}>Use the layout from my designs</button>}
+        </div>}
+      </div>
+    );
+  }
   return (
     <fieldset className="bs-fields" disabled={locked || busy}>
       <label className="bp-field">Bottom tabs (comma separated, up to 5) <CommaInput value={bp.mobile.tabs} max={5} onChange={(v) => set("mobile.tabs", v)} /></label>

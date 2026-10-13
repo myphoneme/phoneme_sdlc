@@ -19,6 +19,12 @@ async def fake(feature, prompt, system=None):
         return {"text": json.dumps({"market_landscape":[{"category":"Clippers","examples":"Notion","what_they_do":"save","limitations":"no repurpose"}],"viability_verdict":"ok","suggested_names":["ThreadVault"],"recommended_features":["Phase 1: ingest"]})}
     if f == ai_router.Feature.NAME_AVAILABILITY_CHECK:
         return {"text": "Memorable and easy to say."}
+    if f == ai_router.Feature.BRAND_IDENTITY and "Brand Studio section" in prompt:
+        if "section: Colour theme" in prompt:
+            return {"text": json.dumps({"reply": "Purple it is.", "changes": {"palette": {"primary": "#7c3aed", "ink": "bad"}}})}
+        if "section: Marketing landing page" in prompt:
+            return {"text": json.dumps({"reply": "Shorter FAQ heading.", "changes": {"copy": {"faq": {"title": "Questions, answered"}}, "landing_sections": ["faq", "hero", "cta", "nope"]}})}
+        return {"text": "not json at all"}
     if f == ai_router.Feature.BRAND_IDENTITY:
         if "taglines" in prompt: return {"text": '{"taglines":["Forward it. Own it.","Your feed, remade"]}'}
         if "palettes" in prompt: return {"text": '{"palettes":[{"name":"Teal Tide","mood":"calm","primary":"#0F766E","ink":"#12302D","surface":"#E3F3F1","accent":"#FF7200","rationale":"x"},{"name":"bad","primary":"red","ink":"#000000","surface":"#ffffff","accent":"#000000"}]}'}
@@ -101,7 +107,9 @@ VISION = {
     (230, 60, 60): {"platform": "phone", "kind": "home", "title": "Home", "tab": "Home", "tabs": ["Home", "Library", "Create", "Profile"], "nav": "tabs"},
     (60, 180, 90): {"platform": "phone", "kind": "list", "title": "Library", "tab": "Library", "tabs": ["Home", "Library", "Create", "Profile"], "nav": "tabs"},
     (60, 90, 220): {"platform": "phone", "kind": "share", "title": "Save to RelayReel", "tab": "", "tabs": [], "nav": "none"},
-    (240, 200, 40): {"platform": "web", "kind": "landing", "title": "Landing", "nav": "top", "landing_sections": ["hero", "features", "download", "faq"], "confidence": 0.95},
+    (240, 200, 40): {"platform": "web", "kind": "landing", "title": "Landing", "nav": "top", "landing_sections": ["hero", "features", "download", "faq"], "confidence": 0.95,
+                     "copy": {"hero": {"title": "A personal library.", "text": "One workspace for what you learn.", "items": ["Get started"]}, "bogus": {"title": "x"},
+                              "features": {"title": "Your curiosity, catalogued.", "items": ["Capture", "Sort", "Share"]}}},
     (150, 60, 200): {"platform": "web", "kind": "sign_in", "title": "Sign in", "nav": "none", "sign_in_methods": ["mobile_otp", "google", "fax"], "confidence": 0.4},
 }
 vision_calls = []
@@ -247,6 +255,28 @@ async def run():
         s = await post("/api/identity/designs/use-colours", {"session_id": sid}); assert s["brand"]["palette"]["primary"] == "#FF6254"
         s = await post("/api/identity/palette", {"session_id": sid, "palette": next(o for o in s["brand"]["palette_options"] if o["name"] == "Teal Tide")})   # back to the teal brand
         s = await post("/api/identity/logos", {"session_id": sid}); await post("/api/identity/logo", {"session_id": sid, "logo_id": s["brand"]["logo_options"][0]["id"]})
+        # landing words read off the landing design (2026-10-13)
+        lc = s["brand"]["blueprint"]["landing_copy"]
+        assert lc["hero"]["title"] == "A personal library." and lc["features"]["items"] == ["Capture", "Sort", "Share"] and "bogus" not in lc, lc
+        # Ask AI per section, with undo
+        s = await post("/api/identity/assist", {"session_id": sid, "section": "colours", "message": "make it purple"})
+        assert s["brand"]["palette"]["primary"] == "#7C3AED" and s["brand"]["palette"]["name"].endswith("(edited)") and s["brand"]["palette"]["ink"] != "bad", s["brand"]["palette"]
+        th = s["brand"]["assist"]["colours"]; assert [m["role"] for m in th] == ["owner", "ai"] and th[1]["applied"] and th[1]["text"] == "Purple it is.", th
+        s = await post("/api/identity/assist/undo", {"session_id": sid, "section": "colours"}); assert s["brand"]["palette"]["name"] == "Teal Tide", s["brand"]["palette"]
+        await post("/api/identity/assist/undo", {"session_id": sid, "section": "colours"}, 409)   # nothing left to undo
+        s = await post("/api/identity/assist", {"session_id": sid, "section": "landing", "message": "shorter faq title, faq first"})
+        bpx = s["brand"]["blueprint"]; assert bpx["landing_copy"]["faq"]["title"] == "Questions, answered" and bpx["landing_copy"]["hero"]["title"] == "A personal library."
+        assert bpx["landing_sections"][0] == "hero" and "nope" not in bpx["landing_sections"], bpx["landing_sections"]   # hero stays first
+        s = await post("/api/identity/assist", {"session_id": sid, "section": "web", "message": "hmm"}); assert s["brand"]["assist"]["web"][-1]["applied"] == []
+        await post("/api/identity/assist", {"session_id": sid, "section": "web", "message": " "}, 400)
+        await post("/api/identity/section", {"session_id": sid, "key": "colours", "action": "freeze"})
+        await post("/api/identity/assist", {"session_id": sid, "section": "colours", "message": "purple"}, 409)
+        await post("/api/identity/section", {"session_id": sid, "key": "colours", "action": "unfreeze"})
+        # a starting point keeps the look read off the designs; "use what was read" brings the structure back
+        s = await post("/api/identity/blueprint/template", {"session_id": sid, "template_key": "saas"})
+        assert s["brand"]["blueprint"]["platforms"] == "web" and s["brand"]["blueprint"]["tokens"]["heading_font"] == "Manrope" and s["brand"]["blueprint"]["landing_copy"]["faq"], s["brand"]["blueprint"]["tokens"]
+        s = await post("/api/identity/designs/refill", {"session_id": sid})
+        assert s["brand"]["blueprint"]["platforms"] == "both" and s["brand"]["blueprint"]["mobile"]["tabs"] == ["Home", "Library", "Create", "Profile"], s["brand"]["blueprint"]["mobile"]
         stale = dict(s["brand"]["blueprint"]); stale["designs"] = []
         s = await post("/api/identity/blueprint", {"session_id": sid, "blueprint": stale}); assert len(s["brand"]["blueprint"]["designs"]) == 5   # server-managed
         pv = await c.get(f"/api/identity/{sid}/blueprint/preview")

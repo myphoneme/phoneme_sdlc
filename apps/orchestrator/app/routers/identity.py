@@ -19,10 +19,10 @@ import xml.etree.ElementTree as ET
 import httpx
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from .. import ai_router, brand, design_import, store
+from .. import ai_router, brand, brand_assist, design_import, store
 from ..locks import session_lock
 from ..models import (
-    BrandOptionsRequest, ChangeOpenRequest, SectionRequest,
+    AssistRequest, BrandOptionsRequest, ChangeOpenRequest, SectionRequest,
     DesignConsentRequest, DesignFileRequest,
     DesignUpdateRequest,
     BlueprintSaveRequest, BlueprintTemplateRequest,
@@ -443,6 +443,9 @@ async def blueprint_template(req: BlueprintTemplateRequest):
         if old:  # keep the version history, module placement and the owner's designs
             bp.version, bp.module_slots = old.version, old.module_slots
             bp.designs, bp.design_hints, bp.design_files = old.designs, old.design_hints, old.design_files
+            bp.landing_copy = old.landing_copy
+            if any(a.status != "ignored" for a in old.designs):  # the look was read off the owner's designs: a layout keeps it
+                bp.tokens = old.tokens
             design_import.place(bp)
         state.brand.blueprint = bp
         await store.save_session(state)
@@ -607,6 +610,46 @@ def design_palette_or_404(state):
     if not p:
         raise HTTPException(400, "no colours were read from your designs")
     return p
+
+
+@router.post("/designs/refill", response_model=SessionState)
+async def designs_refill(req: SessionRequest):
+    """Use what was read off the designs again (after trying a starting point)."""
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        _guard(state, ["theme", "landing", "web", "mobile"])
+        _editable(state, keys=())
+        try:
+            design_import.refill(state)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        await store.save_session(state)
+        return state
+
+
+@router.post("/assist", response_model=SessionState)
+async def assist(req: AssistRequest):
+    """Ask AI to change one Brand Studio section in plain words."""
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        try:
+            await brand_assist.ask(state, req.section, req.message)
+        except ValueError as e:
+            raise HTTPException(409 if "frozen" in str(e) or "change request" in str(e) else 400, str(e))
+        await store.save_session(state)
+        return state
+
+
+@router.post("/assist/undo", response_model=SessionState)
+async def assist_undo(req: AssistRequest):
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        try:
+            brand_assist.undo(state, req.section)
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        await store.save_session(state)
+        return state
 
 
 @router.get("/{session_id}/designs/files")

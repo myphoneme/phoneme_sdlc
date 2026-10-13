@@ -11,12 +11,18 @@ const slotLabel = (k) => SLOT_LABEL[k] || (k.startsWith("tab:") ? `Phone tab · 
 // The owner's design placed in a frame slot, if any.
 const inSlot = (bp, slot) => (bp?.designs || []).find((d) => d.slot === slot && (d.status === "placed" || d.status === "unsure"));
 
-function Shot({ d, asset, phone }) {
-  return <div className={"bv-shotwrap" + (phone ? " phone" : "")}><img className="bv-shot" src={asset(d.design_id)} alt={d.title || "Your design"} loading="lazy" /><span className="bv-yours">Your design</span></div>;
+function Shot({ d, asset, phone, tall }) {
+  return (
+    <div className={"bv-shotwrap" + (phone ? " phone" : "") + (tall ? " tall" : "")}>
+      <img className="bv-shot" src={asset(d.design_id)} alt={d.title || "Your design"} loading="lazy" />
+      <span className="bv-yours">Your design</span>
+      {tall && <a className="bv-open" href={asset(d.design_id)} target="_blank" rel="noreferrer">Open full size</a>}
+    </div>
+  );
 }
 
 // "Your design" vs the same page generated in the brand theme.
-function Either({ d, asset, children, phone }) {
+function Either({ d, asset, children, phone, tall }) {
   const [mine, setMine] = useState(true);
   if (!d) return children;
   return (
@@ -25,7 +31,7 @@ function Either({ d, asset, children, phone }) {
         <button type="button" role="radio" aria-checked={mine} className={mine ? "on" : ""} onClick={() => setMine(true)}>Your design</button>
         <button type="button" role="radio" aria-checked={!mine} className={!mine ? "on" : ""} onClick={() => setMine(false)}>Generated in your theme</button>
       </span>
-      {mine ? <Shot d={d} asset={asset} phone={phone} /> : children}
+      {mine ? <Shot d={d} asset={asset} phone={phone} tall={tall} /> : children}
     </div>
   );
 }
@@ -125,23 +131,35 @@ const SECTION_LABEL = { hero: "Hero", promise: "Promise", features: "How it work
 
 function LandingPreview({ session, bp, favicon, phone, asset }) {
   const b = session.brand || {};
+  const cp = bp?.landing_copy || {};
+  const T = (k, d) => cp[k]?.title || d;
+  const X = (k, d) => cp[k]?.text || d;
+  const I = (k, d) => (cp[k]?.items?.length ? cp[k].items : d);
   const parts = (bp?.landing_sections || ["hero"]).map((k) => {
     switch (k) {
-      case "hero": return <div key={k} className="bv-hero"><span className="bv-eyebrow">{(bp?.public_features || "New").slice(0, 40)}</span><h1>{b.tagline || session.selected_name}</h1><p>{(session.concept_summary || "What the product does, in one sentence.").slice(0, 140)}</p><div className="bv-row center"><Btn>Get started free</Btn><Btn kind="secondary">See how it works</Btn></div><div className="bv-hero-media"><ImageIcon size={22} /></div></div>;
-      case "promise": return <div key={k} className="bv-promise">{["Fast to start", "Private by default", "Works everywhere"].map((x) => <span key={x}><Check size={12} /> {x}</span>)}</div>;
-      case "features": return <div key={k} className="bv-band"><h2>How it works</h2><div className="bv-grid3">{["Capture", "Organise", "Share"].map((x, i) => <Card key={x} title={`${i + 1}. ${x}`}><p className="bv-mut">A short line on this step.</p></Card>)}</div></div>;
-      case "download": return <div key={k} className="bv-band tint"><h2>Get the app</h2><div className="bv-row center"><span className="bv-store">App Store</span><span className="bv-store">Google Play</span><span className="bv-qr" /></div></div>;
-      case "pricing": return <div key={k} className="bv-band"><h2>Plans</h2><div className="bv-grid3">{["Free", "Pro", "Team"].map((x, i) => <div key={x} className={"bv-card plan" + (i === 1 ? " hl" : "")}><h5>{x}</h5><b className="bv-price">{["₹0", "₹299", "₹999"][i]}</b><Btn kind={i === 1 ? "primary" : "secondary"}>Choose</Btn></div>)}</div></div>;
-      case "faq": return <div key={k} className="bv-band"><h2>Questions</h2>{["Is my data private?", "Can I cancel any time?"].map((q) => <div key={q} className="bv-faq">{q}<ChevronRight size={13} /></div>)}</div>;
-      case "cta": return <div key={k} className="bv-cta"><h2>Ready when you are</h2><Btn>Create your account</Btn></div>;
+      case "hero": { const btns = I("hero", ["Get started free", "See how it works"]);
+        return <div key={k} className="bv-hero"><span className="bv-eyebrow">{(bp?.public_features || "New").slice(0, 40)}</span><h1>{T("hero", b.tagline || session.selected_name)}</h1><p>{X("hero", (session.concept_summary || "What the product does, in one sentence.").slice(0, 140))}</p><div className="bv-row center">{btns.slice(0, 2).map((x, i) => <Btn key={x} kind={i ? "secondary" : "primary"}>{x}</Btn>)}</div><div className="bv-hero-media"><ImageIcon size={22} /></div></div>; }
+      case "promise": return <div key={k} className="bv-promise">{I("promise", ["Fast to start", "Private by default", "Works everywhere"]).map((x) => <span key={x}><Check size={12} /> {x}</span>)}</div>;
+      case "features": return <div key={k} className="bv-band"><h2>{T("features", "How it works")}</h2>{cp.features?.text && <p className="bv-mut">{cp.features.text}</p>}<div className="bv-grid3">{I("features", ["Capture", "Organise", "Share"]).slice(0, 6).map((x, i) => <Card key={x} title={`${i + 1}. ${x}`}><p className="bv-mut">A short line on this step.</p></Card>)}</div></div>;
+      case "download": return <div key={k} className="bv-band tint"><h2>{T("download", "Get the app")}</h2>{cp.download?.text && <p className="bv-mut">{cp.download.text}</p>}<div className="bv-row center"><span className="bv-store">App Store</span><span className="bv-store">Google Play</span><span className="bv-qr" /></div></div>;
+      case "pricing": return <div key={k} className="bv-band"><h2>{T("pricing", "Plans")}</h2><div className="bv-grid3">{I("pricing", ["Free", "Pro", "Team"]).slice(0, 3).map((x, i) => <div key={x} className={"bv-card plan" + (i === 1 ? " hl" : "")}><h5>{x}</h5><b className="bv-price">{["₹0", "₹299", "₹999"][i]}</b><Btn kind={i === 1 ? "primary" : "secondary"}>Choose</Btn></div>)}</div></div>;
+      case "faq": return <div key={k} className="bv-band"><h2>{T("faq", "Questions")}</h2>{I("faq", ["Is my data private?", "Can I cancel any time?"]).map((q) => <div key={q} className="bv-faq">{q}<ChevronRight size={13} /></div>)}</div>;
+      case "cta": return <div key={k} className="bv-cta"><h2>{T("cta", "Ready when you are")}</h2><Btn>{I("cta", ["Create your account"])[0]}</Btn></div>;
       default: return <div key={k} className="bv-band"><h2>{SECTION_LABEL[k] || k}</h2></div>;
     }
   });
   const nav = <div className="bv-pubnav"><Mark session={session} size={20} />{!phone && <span className="bv-links">{(bp?.public_pages || []).filter((p) => p !== "Landing").slice(0, 4).map((p) => <span key={p}>{p}</span>)}</span>}<span className="bv-row"><Btn kind="ghost">Sign in</Btn>{!phone && <Btn>Get started</Btn>}</span></div>;
   const land = inSlot(bp, "landing");
-  if (land && !phone) return <Browser session={session} favicon={favicon}><Either d={land} asset={asset}><div className="bv-zoom">{nav}{parts}<div className="bv-foot">© {session.selected_name} · Privacy · Terms</div></div></Either></Browser>;
+  const generated = <div className="bv-zoom">{nav}{parts}<div className="bv-foot">© {session.selected_name} · Privacy · Terms</div></div>;
   if (phone) return <div className="bv-phone landing"><div className="bv-status"><span>9:41</span><span>●●● ▮</span></div>{nav}<div className="bv-pbody">{parts}</div></div>;
-  return <Browser session={session} favicon={favicon}><div className="bv-zoom">{nav}{parts}<div className="bv-foot">© {session.selected_name} · Privacy · Terms</div></div></Browser>;
+  if (land) {
+    return (
+      <Browser session={session} favicon={favicon}>
+        <Either d={land} asset={asset} tall>{generated}</Either>
+      </Browser>
+    );
+  }
+  return <Browser session={session} favicon={favicon}>{generated}</Browser>;
 }
 
 function PageBody({ type, session }) {
@@ -192,32 +210,39 @@ function WebPreview({ session, bp, favicon, asset }) {
 }
 
 function MobilePreview({ session, bp, asset }) {
-  const tabs = bp?.mobile?.tabs?.length ? bp.mobile.tabs : ["Home", "Library", "Create", "Profile"];
+  const webOnly = bp?.platforms === "web";
+  const tabs = !webOnly && bp?.mobile?.tabs?.length ? bp.mobile.tabs : ["Home", "Library", "Create", "Profile"];
   const types = ["dashboard", "List", "Form", "Settings", "Detail"];
   const share = inSlot(bp, "share");
-  const mine = (bp?.designs || []).filter((d) => d.platform === "phone" && d.status === "business");
+  const phones = (bp?.designs || []).filter((d) => d.platform === "phone" && d.status !== "ignored");
+  const loose = phones.filter((d) => !d.slot);
   return (
     <>
-      <div className="bv-phones">
-        {tabs.slice(0, 5).map((t, i) => {
-          const d = inSlot(bp, `tab:${t}`);
-          return (
-            <figure key={t}>
-              {d ? <Shot d={d} asset={asset} phone /> : <Phone session={session} tabs={tabs} active={i} title={t}><PageBody type={types[i] || "List"} session={session} /></Phone>}
-              <figcaption>{t} tab · {d ? "your design" : "generated"}</figcaption>
+      {webOnly && phones.length > 0 && <p className="bv-warn">The layout is web only — your {phones.length} phone screen{phones.length > 1 ? "s are" : " is"} shown here but not placed. Add the phone app to put them in its tabs.</p>}
+      {webOnly ? (
+        <div className="bv-phones">{phones.map((d) => <figure key={d.design_id}><Shot d={d} asset={asset} phone /><figcaption>{d.title}</figcaption></figure>)}</div>
+      ) : (
+        <div className="bv-phones">
+          {tabs.slice(0, 5).map((t, i) => {
+            const d = inSlot(bp, `tab:${t}`);
+            return (
+              <figure key={t}>
+                {d ? <Shot d={d} asset={asset} phone /> : <Phone session={session} tabs={tabs} active={i} title={t}><PageBody type={types[i] || "List"} session={session} /></Phone>}
+                <figcaption>{t} tab · {d ? "your design" : "generated"}</figcaption>
+              </figure>
+            );
+          })}
+          {bp?.mobile?.share_target && (
+            <figure>
+              {share ? <Shot d={share} asset={asset} phone /> : <div className="bv-phone share"><div className="bv-status"><span>9:41</span><span>●●● ▮</span></div><div className="bv-pbody dim" /><div className="bv-sheetup"><b>Share to</b><div className="bv-row"><span className="bv-shareapp"><Mark session={session} size={14} /></span><span className="bv-shareapp ghost" /><span className="bv-shareapp ghost" /></div><Btn>Save to {session.selected_name}</Btn></div></div>}
+              <figcaption>Share sheet · {share ? "your design" : "generated"}</figcaption>
             </figure>
-          );
-        })}
-        {bp?.mobile?.share_target && (
-          <figure>
-            {share ? <Shot d={share} asset={asset} phone /> : <div className="bv-phone share"><div className="bv-status"><span>9:41</span><span>●●● ▮</span></div><div className="bv-pbody dim" /><div className="bv-sheetup"><b>Share to</b><div className="bv-row"><span className="bv-shareapp"><Mark session={session} size={14} /></span><span className="bv-shareapp ghost" /><span className="bv-shareapp ghost" /></div><Btn>Save to {session.selected_name}</Btn></div></div>}
-            <figcaption>Share sheet · {share ? "your design" : "generated"}</figcaption>
-          </figure>
-        )}
-      </div>
-      {mine.length > 0 && <>
-        <h6 className="bv-h6">Your phone screens — become module screens at UI/UX</h6>
-        <div className="bv-phones">{mine.map((d) => <figure key={d.design_id}><Shot d={d} asset={asset} phone /><figcaption>{d.title}</figcaption></figure>)}</div>
+          )}
+        </div>
+      )}
+      {!webOnly && loose.length > 0 && <>
+        <h6 className="bv-h6">Your other phone screens — become module screens at UI/UX</h6>
+        <div className="bv-phones">{loose.map((d) => <figure key={d.design_id}><Shot d={d} asset={asset} phone /><figcaption>{d.title}</figcaption></figure>)}</div>
       </>}
     </>
   );
@@ -231,6 +256,20 @@ function ThemeOnDevices({ session, bp }) {
     <div className={"bv-devices" + (web && phone ? "" : " one")}>
       {web && <figure><div className="bv-mini wide"><AppShell session={session} bp={bp}><PageBody type="dashboard" session={session} /></AppShell></div><figcaption>Web</figcaption></figure>}
       {phone && <figure><Phone session={session} tabs={tabs} active={0} title={tabs[0]}><PageBody type="dashboard" session={session} /></Phone><figcaption>Phone</figcaption></figure>}
+    </div>
+  );
+}
+
+// What the chosen layout sets, so changing it visibly changes the preview.
+function LayoutSummary({ bp }) {
+  if (!bp) return null;
+  const where = bp.platforms === "both" ? `Web + phone app (${bp.primary === "mobile" ? "phone" : "web"} first)` : bp.platforms === "mobile" ? "Phone app" : "Web only";
+  return (
+    <div className="bv-layout">
+      <div><small>Runs on</small><b>{where}</b></div>
+      {bp.platforms !== "mobile" && <div><small>Web menu</small><b>{bp.web?.nav === "top" ? "Top bar" : "Sidebar"} · {bp.web?.home || "dashboard"} home</b></div>}
+      {bp.platforms !== "web" && <div><small>Phone tabs</small><b>{(bp.mobile?.tabs || []).join(" · ")}</b></div>}
+      <div className="wide"><small>Landing page</small><b>{(bp.landing_sections || []).map((k) => SECTION_LABEL[k] || k).join(" → ")}</b></div>
     </div>
   );
 }
@@ -286,7 +325,7 @@ export default function BrandPreview({ section, session, palette, bp, mode, devi
   let body;
   if (section === "name") body = <NamePreview session={session} favicon={favicon} />;
   else if (section === "logo") body = <LogoPreview session={session} favicon={favicon} />;
-  else if (section === "theme") body = <><ThemeSheet session={session} /><h6 className="bv-h6">Your palette on the web and on the phone</h6><ThemeOnDevices session={session} bp={bp} /><h6 className="bv-h6">Standard modules inherit this theme and your logo</h6><StandardPreview session={session} bp={bp} placement={placement} phone={phone} /></>;
+  else if (section === "theme") body = <><LayoutSummary bp={bp} /><ThemeOnDevices session={session} bp={bp} /><h6 className="bv-h6">Colours, type and components</h6><ThemeSheet session={session} /><h6 className="bv-h6">Standard modules inherit this theme and your logo</h6><StandardPreview session={session} bp={bp} placement={placement} phone={phone} /></>;
   else if (section === "designs") body = <DesignsGallery bp={bp} asset={asset} />;
   else if (section === "landing") body = <LandingPreview session={session} bp={bp} favicon={favicon} phone={phone} asset={asset} />;
   else if (section === "web") body = <WebPreview session={session} bp={bp} favicon={favicon} asset={asset} />;

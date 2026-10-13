@@ -230,6 +230,9 @@ def read_prompt(state) -> str:
             '"colors": {"primary": "#hex", "ink": "#hex", "surface": "#hex", "accent": "#hex"}, '
             f'"heading_font": "<closest of: {fonts}>", "body_font": "<closest of the same list>", '
             '"radius": "sharp|rounded|soft", "density": "comfortable|compact", '
+            '"copy": {"hero": {"title": "<exact headline>", "text": "<exact sub-headline>", "items": ["<button labels>"]}, '
+            '"<promise|features|download|pricing|faq|cta>": {"title": "<exact section heading>", "text": "<its intro line>", '
+            '"items": ["<card titles, plan names or questions, in order>"]}} (only for a public landing page; the words exactly as written), '
             '"description": "<one sentence: what the user does on this screen>", "confidence": 0.0}\n'
             "kind 'share' = the sheet another app opens to save something into this product. is_screen=false for logos, "
             "photos, colour swatches or anything that is not a screen. confidence = how sure you are of kind and platform.")
@@ -309,6 +312,8 @@ def fill_blueprint(bp, reads: list[dict]) -> None:
         if navs:
             bp.web.nav = navs.most_common(1)[0][0]
     landing = next((r for r in screens if r.get("kind") == "landing"), None)
+    if landing and isinstance(landing.get("copy"), dict):  # the landing page's own words
+        bp.landing_copy = {**blueprint.clean_copy(landing["copy"]), **bp.landing_copy}
     if landing and landing.get("landing_sections"):
         bp.landing_sections = [s for s in landing["landing_sections"] if s in blueprint.SECTIONS]
         if "download" in bp.landing_sections and "Download app" not in bp.public_pages:
@@ -467,7 +472,7 @@ async def _read_all(session_id: str, ids: list[str]) -> None:
                 a.confidence = 0.5
             if r.get("is_screen") is False:
                 a.status = "ignored"
-            a.read = {k: r[k] for k in ("platform", "kind", "tab", "tabs", "nav", "landing_sections", "sign_in_methods", "register_fields",
+            a.read = {k: r[k] for k in ("platform", "kind", "tab", "tabs", "nav", "landing_sections", "sign_in_methods", "register_fields", "copy",
                                         "colors", "heading_font", "body_font", "radius", "density", "is_screen") if k in r}
         elif a.design_id in errors:
             a.platform = "phone" if a.height > a.width * 1.3 else "web"
@@ -760,6 +765,18 @@ def offer_palette(state, apply: bool = True) -> None:
 
 
 # ------------------------------------------------------------------ managing the uploaded files (2026-10-13)
+def refill(state) -> None:
+    """Rebuild the structure (platforms, tabs, menu, landing, sign-in, look)
+    from everything read off the designs so far."""
+    bp = state.brand.blueprint
+    reads = [{**a.read, "platform": a.platform, "kind": a.kind} for a in bp.designs if a.read and a.status != "ignored"]
+    if not reads:
+        raise ValueError("no designs have been read yet")
+    fill_blueprint(bp, reads)
+    state.brand.blueprint = blueprint.normalise(bp)
+    place(state.brand.blueprint)
+
+
 def files_view(state) -> list[dict]:
     """Every uploaded file with its screens; designs uploaded before files
     were kept appear grouped by their original name."""
