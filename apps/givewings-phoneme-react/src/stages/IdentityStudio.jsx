@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, Check, CircleHelp, Globe, LayoutTemplate, Palette as PaletteIcon, PenLine, RefreshCw, Shapes, Type } from "lucide-react";
+import { ArrowRight, Check, CircleHelp, Globe, LayoutTemplate, Monitor, Palette as PaletteIcon, PenLine, RefreshCw, Shapes, Smartphone, Sparkles, Type } from "lucide-react";
 import { api } from "../api.js";
 import ExperienceStep, { BlueprintSummary } from "./ExperienceBlueprint.jsx";
 
-const STEPS = [
-  { key: "name", label: "Name & domain", icon: Globe },
-  { key: "tagline", label: "Tagline", icon: Type },
-  { key: "colors", label: "Colour theme", icon: PaletteIcon },
-  { key: "logo", label: "Logo", icon: Shapes },
-  { key: "experience", label: "Experience blueprint", icon: LayoutTemplate },
-  { key: "review", label: "Review", icon: Check },
+const SECTIONS = [
+  { key: "name", label: "Brand name", icon: Globe, desc: "Choice of names and domain" },
+  { key: "colors", label: "Colour themes", icon: PaletteIcon, desc: "Light and dark theme tokens" },
+  { key: "logo", label: "Logo & favicon", icon: Shapes, desc: "Logo mark and app icon" },
+  { key: "theme", label: "Final brand theme", icon: Sparkles, desc: "Name, tagline, colors and logo together" },
+  { key: "landing", label: "Marketing landing page", icon: LayoutTemplate, desc: "Public website and landing structure" },
+  { key: "web", label: "Web page catalogue", icon: Monitor, desc: "Web shell and common pages" },
+  { key: "mobile", label: "Mobile page theme", icon: Smartphone, desc: "Tabs, share target and mobile shell" },
 ];
 
 const PRESETS = [
@@ -34,11 +35,10 @@ const isHex = (v) => /^#[0-9a-fA-F]{6}$/.test(v);
 function firstOpenStep(s) {
   const b = s.brand || {};
   if (!s.selected_name || !b.domain_checked_name) return 0;
-  if (!b.tagline) return 1;
-  if (!b.palette) return 2;
-  if (!b.logo) return 3;
+  if (!b.palette) return 1;
+  if (!b.logo) return 2;
   if (!b.blueprint?.frozen) return 4;
-  return 5;
+  return 3;
 }
 
 function Busy({ text }) {
@@ -46,7 +46,30 @@ function Busy({ text }) {
 }
 
 /* ---------------- Step 1: name + domains ---------------- */
-function NameStep({ session, setSession, run, busy, next }) {
+function darkPalette(p) {
+  if (!p) return null;
+  return {
+    ...p,
+    name: `${p.name || "Brand"} Dark`,
+    surface: "#15151B",
+    ink: "#F8F7F5",
+    primary: p.primary,
+    accent: p.accent,
+  };
+}
+
+function sectionStatus(key, session) {
+  const b = session.brand || {};
+  const bp = b.blueprint;
+  if (key === "name") return session.selected_name && b.domain_checked_name ? "done" : "open";
+  if (key === "colors") return b.palette ? "done" : "open";
+  if (key === "logo") return b.logo ? "done" : "open";
+  if (key === "theme") return session.selected_name && b.tagline && b.palette && b.logo ? "done" : "open";
+  if (["landing", "web", "mobile"].includes(key)) return bp?.frozen ? "done" : bp ? "draft" : "open";
+  return "open";
+}
+
+function NameStep({ session, run, busy, next }) {
   const b = session.brand || {};
   const [name, setName] = useState(session.selected_name || b.domain_checked_name || session.suggested_names?.[0] || "");
   const [domain, setDomain] = useState(b.chosen_domain || "");
@@ -112,14 +135,14 @@ function NameStep({ session, setSession, run, busy, next }) {
 
       <div className="sticky-actions">
         <span className="muted">{!checked ? "Check the name to see domain availability." : domain ? <>Using <strong>{name}</strong> with <strong>{domain}</strong></> : "Pick an available domain, or continue without one."}</span>
-        <button className="btn-primary" disabled={busy || !checked} onClick={useName}>Use this name <ArrowRight size={16} /></button>
+        <button className="btn-primary" disabled={busy || !checked} onClick={useName}>Save brand name <ArrowRight size={16} /></button>
       </div>
     </div>
   );
 }
 
 /* ---------------- Step 2: tagline ---------------- */
-function TaglineStep({ session, run, busy, next }) {
+function TaglineStep({ session, run, busy }) {
   const b = session.brand || {};
   const [value, setValue] = useState(b.tagline || "");
   useEffect(() => {
@@ -143,7 +166,7 @@ function TaglineStep({ session, run, busy, next }) {
       </div>
       <div className="sticky-actions">
         <span className="muted">{value ? <>“{value}”</> : "Pick or write a tagline."}</span>
-        <button className="btn-primary" disabled={busy || !value.trim()} onClick={() => run("Saving…", () => api.chooseTagline(session.session_id, value.trim()), next)}>Use tagline <ArrowRight size={16} /></button>
+        <button className="btn-primary" disabled={busy || !value.trim()} onClick={() => run("Saving…", () => api.chooseTagline(session.session_id, value.trim()))}>Save tagline <ArrowRight size={16} /></button>
       </div>
     </div>
   );
@@ -169,7 +192,7 @@ function ThemePreview({ p, name, tagline }) {
   );
 }
 
-function ColorsStep({ session, run, busy, next }) {
+function ColorsStep({ session, run, busy }) {
   const b = session.brand || {};
   const [p, setP] = useState(b.palette || b.palette_options?.[0] || PRESETS[0]);
   useEffect(() => {
@@ -217,19 +240,28 @@ function ColorsStep({ session, run, busy, next }) {
           </div>
           {p.rationale && <p className="ai-note small"><span className="chip">AI</span> {p.rationale}</p>}
         </div>
-        <ThemePreview p={p} name={session.selected_name} tagline={b.tagline} />
+        <div className="theme-preview-stack">
+          <div>
+            <h4 className="mini-head">Light theme</h4>
+            <ThemePreview p={p} name={session.selected_name} tagline={b.tagline} />
+          </div>
+          <div>
+            <h4 className="mini-head">Dark theme</h4>
+            <ThemePreview p={darkPalette(p)} name={session.selected_name} tagline={b.tagline} />
+          </div>
+        </div>
       </div>
 
       <div className="sticky-actions">
         <button className="btn-secondary" disabled={busy} onClick={() => run("Designing new palettes…", () => api.genPalettes(session.session_id))}><RefreshCw size={15} /> New AI palettes</button>
-        <button className="btn-primary" disabled={busy || !valid || textC < 4.5} onClick={() => run("Saving…", () => api.choosePalette(session.session_id, p), next)}>Use this theme <ArrowRight size={16} /></button>
+        <button className="btn-primary" disabled={busy || !valid || textC < 4.5} onClick={() => run("Saving…", () => api.choosePalette(session.session_id, p))}>Save color theme <ArrowRight size={16} /></button>
       </div>
     </div>
   );
 }
 
 /* ---------------- Step 4: logo ---------------- */
-function LogoStep({ session, run, busy, next }) {
+function LogoStep({ session, run, busy }) {
   const b = session.brand || {};
   const [sel, setSel] = useState(b.logo?.id || "");
   useEffect(() => {
@@ -251,7 +283,7 @@ function LogoStep({ session, run, busy, next }) {
       <p className="muted small">Concepts are vector (SVG) starting points drawn by GiveWings AI in your theme — a designer can refine the chosen one.</p>
       <div className="sticky-actions">
         <button className="btn-secondary" disabled={busy} onClick={() => run("Drawing new concepts…", () => api.genLogos(session.session_id))}><RefreshCw size={15} /> New concepts</button>
-        <button className="btn-primary" disabled={busy || !sel} onClick={() => run("Saving…", () => api.chooseLogo(session.session_id, sel), next)}>Use this logo <ArrowRight size={16} /></button>
+        <button className="btn-primary" disabled={busy || !sel} onClick={() => run("Saving…", () => api.chooseLogo(session.session_id, sel))}>Save logo <ArrowRight size={16} /></button>
       </div>
     </div>
   );
@@ -275,23 +307,33 @@ export function IdentitySummary({ session }) {
 }
 
 function ReviewStep({ session, run, busy }) {
+  const ready = !!(session.selected_name && session.brand?.tagline && session.brand?.palette && session.brand?.logo && session.brand?.blueprint?.frozen);
   return (
     <div className="id-step">
       <IdentitySummary session={session} />
       <BlueprintSummary session={session} />
+      <div className="global-module-note">
+        <Check size={16} />
+        <div>
+          <strong>Global modules inherit this theme</strong>
+          <p>Authentication, profile, management, roles, security and other standard pages keep the GiveWings-approved layouts. Only color tokens, logo placement, favicon and typography are applied from this Identity stage.</p>
+        </div>
+      </div>
       <div className="sticky-actions">
-        <span className="muted">Next, GiveWings AI breaks {session.selected_name} into modules, and each module is placed into this frame.</span>
-        <button className="btn-primary" disabled={busy} onClick={() => run("Locking identity…", () => api.completeIdentity(session.session_id))}>Confirm identity &amp; continue <ArrowRight size={16} /></button>
+        <span className="muted">{ready ? `Next, GiveWings AI breaks ${session.selected_name} into modules, and each module is placed into this frame.` : "Complete the brand name, theme, logo and frozen experience blueprint to continue."}</span>
+        <button className="btn-primary" disabled={busy || !ready} onClick={() => run("Locking identity…", () => api.completeIdentity(session.session_id))}>Confirm identity &amp; continue <ArrowRight size={16} /></button>
       </div>
     </div>
   );
 }
 
 export default function IdentityStudio({ session, setSession }) {
-  const [step, setStep] = useState(() => firstOpenStep(session));
+  const [section, setSection] = useState(() => SECTIONS[firstOpenStep(session)]?.key || "name");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState(null);
-  const reached = firstOpenStep(session);
+  const b = session.brand || {};
+  const p = b.palette || PRESETS[0];
+  const dark = darkPalette(p);
 
   async function run(label, fn, after) {
     setBusy(label);
@@ -306,35 +348,85 @@ export default function IdentityStudio({ session, setSession }) {
       setBusy("");
     }
   }
-  const next = () => setStep((i) => Math.min(i + 1, STEPS.length - 1));
-  const props = { session, setSession, run, busy: !!busy, next };
+  const props = { session, setSession, run, busy: !!busy };
+  const active = SECTIONS.find((s) => s.key === section) || SECTIONS[0];
+  const ActiveIcon = active.icon;
 
   return (
     <div className="identity-studio">
-      <ol className="substeps" aria-label="Identity steps">
-        {STEPS.map((s, i) => {
-          const Icon = s.icon;
-          const state = i < reached ? "done" : i === reached ? "current" : "todo";
-          return (
-            <li key={s.key}>
-              <button type="button" className={`substep ${state}${i === step ? " active" : ""}`} disabled={i > reached} onClick={() => setStep(i)} aria-current={i === step ? "step" : undefined}>
-                <span className="substep-icon">{state === "done" ? <Check size={13} strokeWidth={3} /> : <Icon size={14} />}</span>
-                {s.label}
+      <div className="identity-top">
+        <div>
+          <span className="stage-eyebrow">Live identity studio</span>
+          <h3>Freeze the product identity once it feels right.</h3>
+          <p>Name, brand, colors, logo, landing page, web catalogue and mobile theme can be changed on the fly before the final freeze.</p>
+        </div>
+        <div className="identity-mini-preview" style={{ background: p.surface, color: p.ink }}>
+          <span className="brand-favicon" style={{ background: p.primary, color: contrast("#FFFFFF", p.primary) >= contrast(p.ink, p.primary) ? "#FFFFFF" : p.ink }}>
+            {b.logo ? <img src={svgSrc(b.logo.svg)} alt="" /> : (session.selected_name || "?").charAt(0)}
+          </span>
+          <div><strong>{session.selected_name || "Brand name"}</strong><small>{b.tagline || "Tagline not finalised"}</small></div>
+        </div>
+      </div>
+
+      <div className="identity-workbench">
+        <aside className="identity-freeze-list" aria-label="Identity freeze sections">
+          {SECTIONS.map((s) => {
+            const Icon = s.icon;
+            const st = sectionStatus(s.key, session);
+            return (
+              <button key={s.key} type="button" className={`${section === s.key ? "active" : ""} ${st}`} onClick={() => setSection(s.key)} aria-current={section === s.key ? "step" : undefined}>
+                <span className="substep-icon">{st === "done" ? <Check size={13} strokeWidth={3} /> : <Icon size={14} />}</span>
+                <span><strong>{s.label}</strong><small>{s.desc}</small></span>
               </button>
-            </li>
-          );
-        })}
-      </ol>
+            );
+          })}
+        </aside>
 
-      {busy && <Busy text={busy} />}
-      {error && <div className="error-banner" role="alert"><CircleHelp size={15} /> {error}</div>}
+        <main className="identity-editor">
+          <header className="identity-editor-head">
+            <span className="stage-panel-icon" aria-hidden="true"><ActiveIcon size={20} /></span>
+            <div>
+              <span className="stage-eyebrow">Freeze area</span>
+              <h3>{active.label}</h3>
+              <p>{active.desc}</p>
+            </div>
+          </header>
 
-      {step === 0 && <NameStep {...props} />}
-      {step === 1 && <TaglineStep {...props} />}
-      {step === 2 && <ColorsStep {...props} />}
-      {step === 3 && <LogoStep {...props} />}
-      {step === 4 && <ExperienceStep session={session} setSession={setSession} next={next} />}
-      {step === 5 && <ReviewStep {...props} />}
+          {busy && <Busy text={busy} />}
+          {error && <div className="error-banner" role="alert"><CircleHelp size={15} /> {error}</div>}
+
+          {section === "name" && (
+            <>
+              <NameStep {...props} />
+              <TaglineStep {...props} />
+            </>
+          )}
+          {section === "colors" && <ColorsStep {...props} />}
+          {section === "logo" && <LogoStep {...props} />}
+          {section === "theme" && (
+            <div className="id-step">
+              <IdentitySummary session={session} />
+              <div className="theme-preview-stack two-col">
+                <div><h4 className="mini-head">Light theme</h4><ThemePreview p={p} name={session.selected_name} tagline={b.tagline} /></div>
+                <div><h4 className="mini-head">Dark theme</h4><ThemePreview p={dark} name={session.selected_name} tagline={b.tagline} /></div>
+              </div>
+              <ReviewStep {...props} />
+            </div>
+          )}
+          {["landing", "web", "mobile"].includes(section) && (
+            <div className="id-step">
+              <div className="global-module-note">
+                <Check size={16} />
+                <div>
+                  <strong>Standard pages are not redesigned every time</strong>
+                  <p>Sign in, change password, profile, management and security pages use the standard catalogue. This section decides the shell, landing structure, logo placement and inherited color theme.</p>
+                </div>
+              </div>
+              <ExperienceStep session={session} setSession={setSession} compact />
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

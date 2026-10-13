@@ -278,6 +278,28 @@ button.journey-link:hover { background: #faf6f2; }
 
 /* ---------- Identity studio ---------- */
 .identity-studio { display: flex; flex-direction: column; gap: 18px; }
+.identity-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px); gap: 16px; align-items: stretch; padding: 16px; border: 1px solid #efeae5; border-radius: 14px; background: #fff; }
+.identity-top h3 { font: 800 22px Manrope, sans-serif; letter-spacing: -.04em; color: #171717; margin-top: 4px; }
+.identity-top p { color: #5f6368; font-size: 13.5px; line-height: 1.55; margin-top: 7px; max-width: 700px; }
+.identity-mini-preview { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 12px; border: 1px solid #0000001a; min-width: 0; }
+.identity-mini-preview strong, .identity-mini-preview small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.identity-mini-preview strong { font: 800 17px Manrope, sans-serif; letter-spacing: -.03em; }
+.identity-mini-preview small { opacity: .74; font-size: 12px; margin-top: 3px; }
+.brand-favicon { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; flex: none; font: 900 20px Manrope, sans-serif; overflow: hidden; }
+.brand-favicon img { width: 88%; height: 88%; object-fit: contain; }
+.identity-workbench { display: grid; grid-template-columns: minmax(230px, 280px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.identity-freeze-list { position: sticky; top: 86px; display: grid; gap: 8px; padding: 10px; border-radius: 14px; border: 1px solid #efeae5; background: #fff; }
+.identity-freeze-list button { border: 1px solid transparent; background: none; border-radius: 11px; padding: 10px; display: flex; align-items: flex-start; gap: 10px; text-align: left; color: #4b4e54; }
+.identity-freeze-list button.active { border-color: #f0d0b8; background: #fff7f0; box-shadow: 0 5px 16px #241a1208; color: #171717; }
+.identity-freeze-list button strong, .identity-freeze-list button small { display: block; }
+.identity-freeze-list button strong { font: 800 13px Manrope, sans-serif; letter-spacing: -.02em; }
+.identity-freeze-list button small { font-size: 11.5px; line-height: 1.35; margin-top: 3px; color: #6b6e74; }
+.identity-freeze-list button.done .substep-icon { background: #ff7200; color: #fff; }
+.identity-freeze-list button.draft .substep-icon { background: #fff0e5; color: #c2410c; }
+.identity-editor { min-width: 0; display: grid; gap: 14px; }
+.identity-editor-head { display: flex; gap: 12px; align-items: flex-start; padding: 16px; border: 1px solid #efeae5; border-radius: 14px; background: #fff; }
+.identity-editor-head h3 { font: 800 20px Manrope, sans-serif; letter-spacing: -.04em; color: #171717; margin-top: 2px; }
+.identity-editor-head p { color: #6b6e74; font-size: 13px; margin-top: 4px; }
 .substeps { list-style: none; margin: 0; padding: 4px; display: flex; gap: 4px; background: #f6f3f0; border-radius: 12px; overflow-x: auto; }
 .substep { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border: 0; border-radius: 9px; background: none; color: #4b4e54; font-size: 13px; font-weight: 700; white-space: nowrap; }
 .substep:disabled { color: #9a9da3; cursor: not-allowed; opacity: 1 !important; }
@@ -316,6 +338,8 @@ button.journey-link:hover { background: #faf6f2; }
 .swatches.inline { display: inline-flex; align-items: center; gap: 12px; }
 .swatches.inline i { width: 18px; height: 18px; }
 .theme-builder { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 18px; align-items: start; }
+.theme-preview-stack { display: grid; gap: 12px; }
+.theme-preview-stack.two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .color-fields { display: grid; gap: 10px; }
 .color-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 700; color: #1c2027; }
 .color-input { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #e6e1dc; border-radius: 10px; padding: 4px 8px 4px 4px; background: #fff; }
@@ -347,6 +371,10 @@ button.journey-link:hover { background: #faf6f2; }
 .identity-summary dl { flex: 1; min-width: 240px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; margin: 0; }
 .identity-summary dt { font-size: 10.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; opacity: .75; }
 .identity-summary dd { margin: 4px 0 0; font-size: 14px; font-weight: 700; }
+.global-module-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid #dceee3; border-radius: 12px; background: #f1faf4; color: #174d31; }
+.global-module-note svg { flex: none; margin-top: 2px; }
+.global-module-note strong { display: block; font: 800 13.5px Manrope, sans-serif; color: #123d28; }
+.global-module-note p { margin-top: 4px; font-size: 12.5px; line-height: 1.45; color: #315a43; }
 
 /* ---------- Freeze scope editor ---------- */
 .scope { display: flex; flex-direction: column; gap: 16px; }
@@ -549,7 +577,10 @@ button.journey-link:hover { background: #faf6f2; }
   .stage-panel-icon { width: 40px; height: 40px; }
   .stage-panel-head h2 { font-size: 20px; }
   .stage-panel-body { padding: 18px; }
+  .identity-top, .identity-workbench { grid-template-columns: 1fr; }
+  .identity-freeze-list { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .list-grid, .brief-grid, .domain-grid, .theme-builder, .identity-summary dl { grid-template-columns: 1fr; }
+  .theme-preview-stack.two-col { grid-template-columns: 1fr; }
   .module-edit { grid-template-columns: minmax(0, 1fr); }
   .module-num { display: none; }
   .module-tools { flex-direction: row; }
@@ -571,6 +602,7 @@ button.journey-link:hover { background: #faf6f2; }
   .inline-field { flex-wrap: wrap; padding: 6px; }
   .inline-field input { flex-basis: 100%; padding: 0 6px; }
   .inline-field .btn-primary, .inline-field .btn-secondary { width: 100%; }
+  .identity-freeze-list { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   .stage-panel, .msg, .spinner, .typing-dot { animation: none !important; }
