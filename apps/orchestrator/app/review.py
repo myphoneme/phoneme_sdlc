@@ -77,12 +77,31 @@ def doc_hash(item) -> str:
     return hashlib.sha1(raw.encode()).hexdigest()[:12]
 
 
+BRAND_KEY = "Brand identity"
+BRAND_BOUND = ("uiux", "uxflow")  # screens and flows are drawn in the brand: a new brand version needs re-approval
+
+
+def brand_version(state: SessionState) -> str:
+    b = state.brand
+    return (b.version or ("1.0" if b.completed else "")) if b else ""
+
+
+def snapshot(kind: Kind, state: SessionState) -> dict:
+    cur = {getattr(i, kind.id_attr): doc_hash(i) for i in items(kind, state)}
+    if kind.doc_type in BRAND_BOUND and brand_version(state):
+        cur[BRAND_KEY] = "v" + brand_version(state)
+    return cur
+
+
 def baseline_status(kind: Kind, state: SessionState) -> dict:
     its = items(kind, state)
     prev = [b for b in state.baselines if b.doc_type == kind.doc_type]
     last = prev[-1] if prev else None
-    cur = {getattr(i, kind.id_attr): doc_hash(i) for i in its}
-    changed = [] if not last else sorted(k for k in set(cur) | set(last.snapshot) if cur.get(k) != last.snapshot.get(k))
+    cur = snapshot(kind, state)
+    old = dict(last.snapshot) if last else {}
+    if last and BRAND_KEY in cur and BRAND_KEY not in old:
+        old[BRAND_KEY] = "v1.0"  # baselined before brand versions existed
+    changed = [] if not last else sorted(k for k in set(cur) | set(old) if cur.get(k) != old.get(k))
     if last:
         major, minor = last.version.split(".")
         nxt = f"{major}.{int(minor) + 1}"
@@ -330,7 +349,7 @@ def make_router(kind: Kind) -> APIRouter:
                 desc = f"Initial baseline — {len(its)} documents frozen" + (f", {n_dec} product-owner decisions recorded" if n_dec else "")
             state.baselines.append(Baseline(
                 doc_type=kind.doc_type, version=st["next_version"], at=now(), description=desc,
-                snapshot={getattr(i, kind.id_attr): doc_hash(i) for i in its},
+                snapshot=snapshot(kind, state),
             ))
             if state.stage == kind.stage:
                 state.stage = kind.next_stage

@@ -486,10 +486,16 @@ async def run():
         # --- Step 2/3: the owner's screens are matched to modules; modules with no design need a decision
         s = (await c.get(f"/api/discovery/{sid}")).json(); dsg = s["brand"]["blueprint"]["designs"]
         lst = next(d for d in dsg if d["kind"] == "list"); hom = next(d for d in dsg if d["kind"] == "home")
-        await post("/api/identity/blueprint/unfreeze", {"session_id": sid})
+        # Identity is frozen: changing it is a change request (Brand Studio, 2026-10-13)
+        await post("/api/identity/designs/update", {"session_id": sid, "design_id": lst["design_id"], "slot": "", "status": "business"}, 409)
+        s = await post("/api/identity/change/open", {"session_id": sid, "sections": ["web", "mobile", "landing"], "reason": "two screens are module screens"})
+        assert s["brand"]["change"]["sections"] == ["web", "mobile", "landing"] and s["brand"]["change"]["impacts"], s["brand"]["change"]
+        await post("/api/identity/tagline", {"session_id": sid, "value": "nope"}, 409)   # not part of the request
         for d in (lst, hom):
             await post("/api/identity/designs/update", {"session_id": sid, "design_id": d["design_id"], "slot": "", "status": "business"})
-        await post("/api/identity/blueprint/freeze", {"session_id": sid})
+        s = await post("/api/identity/complete", {"session_id": sid})
+        assert s["brand"]["version"] == "1.1" and s["brand"]["change"] is None and s["brand"]["blueprint"]["frozen"], s["brand"]["version"]
+        assert [h["version"] for h in s["brand"]["history"]][-1] == "1.1" and "Change request" in s["brand"]["history"][-1]["summary"]
         b = (await c.get(f"/api/uiux/{sid}/designs")).json()
         st3 = {m["module"]: m["state"] for m in b["modules"]}
         assert b["active"] and "not matched" in b["blocked"] and st3["Repurpose Studio"] == "decide" and st3["Capture & Catalogue"] == "yours", b
@@ -581,5 +587,33 @@ async def run():
         names = set(zipfile.ZipFile(_io.BytesIO(zp.content)).namelist())
         assert zp.headers["content-disposition"].endswith('RelayReel_SDLC_Pack.zip"') and want <= names, names
         print("pack:", sorted(names))
+        # --- Brand Studio (2026-10-13): sections, light + dark, favicon, change requests and re-approval
+        st = (await c.get(f"/api/identity/{sid}/brand")).json()
+        assert st["frozen"] and st["version"] == "1.1" and [x["key"] for x in st["sections"]] == ["name", "colours", "logo", "theme", "landing", "web", "mobile"], st
+        assert all(x["status"] in ("frozen", "na") for x in st["sections"]) and st["dark"]["surface"].startswith("#") and "Sign in" in st["standard_pages"], st
+        fv = await c.get(f"/api/identity/{sid}/favicon.svg"); assert fv.headers["content-type"].startswith("image/svg") and "<text" in fv.text, fv.text
+        await post("/api/identity/section", {"session_id": sid, "key": "colours", "action": "unfreeze"}, 409)
+        await post("/api/identity/options", {"session_id": sid, "logo_placement": "center"}, 409)
+        tag = s["brand"]["tagline"]
+        s = await post("/api/identity/change/open", {"session_id": sid, "sections": ["name"], "reason": "try a tagline"})
+        s = await post("/api/identity/tagline", {"session_id": sid, "value": "Something else"}); assert s["brand"]["tagline"] == "Something else"
+        s = await post("/api/identity/change/cancel", {"session_id": sid})
+        assert s["brand"]["tagline"] == tag and s["brand"]["completed"] and s["brand"]["change"] is None and s["brand"]["version"] == "1.1", s["brand"]["tagline"]
+        s = await post("/api/identity/change/open", {"session_id": sid, "sections": ["colours", "logo", "bogus"], "reason": "warmer brand"})
+        assert s["brand"]["change"]["sections"] == ["colours", "logo"] and any("UI/UX Design" in i for i in s["brand"]["change"]["impacts"]), s["brand"]["change"]
+        pal = dict(s["brand"]["palette"]); pal.update(primary="#7C3AED", dark_primary="", dark_surface="#101014")
+        s = await post("/api/identity/palette", {"session_id": sid, "palette": pal})
+        dp = s["brand"]["palette"]; assert dp["dark_surface"] == "#101014" and dp["dark_primary"] == "" and s["brand"]["logo"], dp
+        dk = (await c.get(f"/api/identity/{sid}/brand")).json()["dark"]; assert dk["surface"] == "#101014" and dk["primary"].startswith("#"), dk
+        await post("/api/identity/palette", {"session_id": sid, "palette": {**pal, "dark_ink": "white"}}, 400)
+        s = await post("/api/identity/options", {"session_id": sid, "favicon_style": "logo"}); assert s["brand"]["favicon_style"] == "logo"
+        assert "<svg x=" in (await c.get(f"/api/identity/{sid}/favicon.svg")).text
+        s = await post("/api/identity/section", {"session_id": sid, "key": "colours", "action": "freeze"}); assert s["brand"]["sections"]["colours"] == "frozen"
+        await post("/api/identity/palette", {"session_id": sid, "palette": pal}, 409)   # frozen section, even inside the request
+        s = await post("/api/identity/complete", {"session_id": sid}); assert s["brand"]["version"] == "1.2" and s["brand"]["change"] is None
+        bs = (await c.get(f"/api/uiux/{sid}/baseline")).json(); assert "Brand identity" in bs["changed_since"], bs
+        bs = (await c.get(f"/api/uxflow/{sid}/baseline")).json(); assert "Brand identity" in bs["changed_since"], bs
+        s = await post(f"/api/uiux/{sid}/baseline", {})
+        bs = (await c.get(f"/api/uiux/{sid}/baseline")).json(); assert bs["changed_since"] == [] and bs["version"] == "1.2", bs
         print("ALL OK")
 asyncio.run(run())

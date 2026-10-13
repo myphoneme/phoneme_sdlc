@@ -19,9 +19,10 @@ import xml.etree.ElementTree as ET
 import httpx
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from .. import ai_router, design_import, store
+from .. import ai_router, brand, design_import, store
 from ..locks import session_lock
 from ..models import (
+    BrandOptionsRequest, ChangeOpenRequest, SectionRequest,
     DesignConsentRequest,
     DesignUpdateRequest,
     BlueprintSaveRequest, BlueprintTemplateRequest,
@@ -105,6 +106,15 @@ async def _get(session_id: str) -> SessionState:
     return state
 
 
+def _guard(state: SessionState, keys) -> None:
+    """Brand Studio rule: a frozen section (or a frozen Identity without an
+    open change request) cannot change."""
+    try:
+        brand.check_edit(state, keys)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
 def _concept(state: SessionState) -> str:
     return (state.concept_summary or "").strip()
 
@@ -117,6 +127,7 @@ async def check_domains(req: DomainCheckRequest):
     if not name:
         raise HTTPException(400, "name required")
     state = await _get(req.session_id)
+    _guard(state, "name")
     domains = domain_candidates(name)
     async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
         results = await asyncio.gather(*(check_domain(client, d) for d in domains))
@@ -146,14 +157,17 @@ async def check_domains(req: DomainCheckRequest):
 @router.post("/name", response_model=SessionState)
 async def choose_name(req: ChooseRequest):
     state = await _get(req.session_id)
+    _guard(state, "name")
     name = req.value.strip()
     if not name:
         raise HTTPException(400, "name required")
     if state.selected_name != name:
-        # A new name invalidates name-dependent choices made earlier.
+        # A new name invalidates name-dependent choices made earlier
+        # (a frozen logo stays until its section is reopened).
         state.brand.tagline_options = []
-        state.brand.logo_options = []
-        state.brand.logo = None
+        if state.brand.sections.get("logo") != "frozen":
+            state.brand.logo_options = []
+            state.brand.logo = None
     state.selected_name = name
     await store.save_session(state)
     return state
@@ -162,6 +176,7 @@ async def choose_name(req: ChooseRequest):
 @router.post("/domain", response_model=SessionState)
 async def choose_domain(req: ChooseRequest):
     state = await _get(req.session_id)
+    _guard(state, "name")
     state.brand.chosen_domain = req.value.strip() or None
     await store.save_session(state)
     return state
@@ -171,6 +186,7 @@ async def choose_domain(req: ChooseRequest):
 async def generate_taglines(req: SessionRequest):
     async with session_lock(req.session_id, "taglines"):
         state = await _get(req.session_id)
+        _guard(state, "name")
         if not state.selected_name:
             raise HTTPException(400, "choose a name first")
         r = await ai_router.generate(
@@ -194,6 +210,7 @@ async def generate_taglines(req: SessionRequest):
 @router.post("/tagline", response_model=SessionState)
 async def choose_tagline(req: ChooseRequest):
     state = await _get(req.session_id)
+    _guard(state, "name")
     state.brand.tagline = req.value.strip() or None
     await store.save_session(state)
     return state
@@ -212,6 +229,8 @@ def _palette(d: dict) -> Palette | None:
             surface=str(d.get("surface", "")).strip(),
             accent=str(d.get("accent", "")).strip(),
             rationale=_clean_line(str(d.get("rationale", "")))[:300],
+            **{k: v for k in ("dark_primary", "dark_ink", "dark_surface", "dark_accent")
+               if HEX.match(v := str(d.get(k, "")).strip())},
         )
     except Exception:
         return None
@@ -224,6 +243,7 @@ def _palette(d: dict) -> Palette | None:
 async def generate_palettes(req: SessionRequest):
     async with session_lock(req.session_id, "palettes"):
         state = await _get(req.session_id)
+        _guard(state, "colours")
         r = await ai_router.generate(
             ai_router.Feature.BRAND_IDENTITY,
             f"Product name: {state.selected_name}\nTagline: {state.brand.tagline or '-'}\n"
@@ -231,10 +251,14 @@ async def generate_palettes(req: SessionRequest):
             "Propose 3 distinct brand colour palettes for this product. Each "
             "needs: primary (brand colour), ink (near-black text colour), "
             "surface (very light background tint), accent (secondary "
-            "highlight). ink on surface must have contrast >= 7:1. Respond "
-            'with ONLY JSON: {"palettes": [{"name": "...", "mood": "3-4 words", '
+            "highlight). ink on surface must have contrast >= 7:1. Give each "
+            "palette its dark theme too: dark_surface (near-black, brand-tinted), "
+            "dark_ink (near-white text, >= 7:1 on dark_surface), dark_primary and "
+            "dark_accent (the brand colours lifted to read on dark_surface, >= 4.5:1). "
+            'Respond with ONLY JSON: {"palettes": [{"name": "...", "mood": "3-4 words", '
             '"primary": "#RRGGBB", "ink": "#RRGGBB", "surface": "#RRGGBB", '
-            '"accent": "#RRGGBB", "rationale": "one sentence"}]}',
+            '"accent": "#RRGGBB", "dark_primary": "#RRGGBB", "dark_ink": "#RRGGBB", '
+            '"dark_surface": "#RRGGBB", "dark_accent": "#RRGGBB", "rationale": "one sentence"}]}',
             system="You are a brand designer. JSON only, hex colours only.",
         )
         try:
@@ -252,13 +276,15 @@ async def generate_palettes(req: SessionRequest):
 @router.post("/palette", response_model=SessionState)
 async def choose_palette(req: PaletteRequest):
     state = await _get(req.session_id)
+    _guard(state, "colours")
     p = req.palette
     if not all(HEX.match(c) for c in (p.primary, p.ink, p.surface, p.accent)):
         raise HTTPException(400, "palette colours must be #RRGGBB")
-    if state.brand.palette != p:
-        state.brand.logo_options = []  # logos are drawn in the palette
-        state.brand.logo = None
-    state.brand.palette = p
+    for k in ("dark_primary", "dark_ink", "dark_surface", "dark_accent"):
+        v = getattr(p, k)
+        if v and not HEX.match(v):
+            raise HTTPException(400, "palette colours must be #RRGGBB")
+    state.brand.palette = p  # dark fields left empty are derived from the light ones; the logo stays
     state.selected_theme = p.name
     await store.save_session(state)
     return state
@@ -310,7 +336,8 @@ def sanitize_svg(raw: str) -> str | None:
 
     if local(root.tag) != "svg" or not clean(root):
         return None
-    root.set("xmlns", SVG_NS)
+    if not root.tag.startswith("{"):
+        root.set("xmlns", SVG_NS)  # a namespaced root already gets xmlns from the serializer
     if "viewBox" not in root.attrib:
         root.set("viewBox", "0 0 240 80")
     ET.register_namespace("", SVG_NS)
@@ -322,6 +349,7 @@ def sanitize_svg(raw: str) -> str | None:
 async def generate_logos(req: SessionRequest):
     async with session_lock(req.session_id, "logos"):
         state = await _get(req.session_id)
+        _guard(state, "logo")
         if not state.selected_name or not state.brand.palette:
             raise HTTPException(400, "choose a name and colour theme first")
         p = state.brand.palette
@@ -365,6 +393,7 @@ async def generate_logos(req: SessionRequest):
 @router.post("/logo", response_model=SessionState)
 async def choose_logo(req: LogoChoiceRequest):
     state = await _get(req.session_id)
+    _guard(state, "logo")
     logo = next((l for l in state.brand.logo_options if l.id == req.logo_id), None)
     if not logo:
         raise HTTPException(404, "logo concept not found")
@@ -390,10 +419,12 @@ async def blueprint_suggest(session_id: str):
     return {"template_key": blueprint.suggest(await _get(session_id))}
 
 
-def _editable(state: SessionState):
+def _editable(state: SessionState, keys=("landing", "web", "mobile")):
     bp = state.brand.blueprint
     if bp and bp.frozen:
         raise HTTPException(409, "the experience blueprint is frozen; unfreeze it to make changes")
+    if keys:
+        _guard(state, [k for k in keys if brand.applicable(state, k)])
 
 
 @router.post("/blueprint/template", response_model=SessionState)
@@ -401,7 +432,8 @@ async def blueprint_template(req: BlueprintTemplateRequest):
     from .. import blueprint
     async with session_lock(req.session_id, "blueprint"):
         state = await _get(req.session_id)
-        _editable(state)
+        _guard(state, ["theme", "landing", "web", "mobile"])
+        _editable(state, keys=())
         try:
             bp = blueprint.from_template(req.template_key, state)
         except KeyError:
@@ -421,9 +453,10 @@ async def blueprint_save(req: BlueprintSaveRequest):
     from .. import blueprint
     async with session_lock(req.session_id, "blueprint"):
         state = await _get(req.session_id)
-        _editable(state)
+        _editable(state, keys=())
         bp = blueprint.normalise(req.blueprint)
         old = state.brand.blueprint
+        _guard(state, brand.blueprint_sections(old, bp))
         bp.version, bp.frozen, bp.frozen_at = (old.version if old else ""), False, ""
         bp.designs, bp.design_hints = (old.designs, old.design_hints) if old else ([], bp.design_hints)  # server-managed
         design_import.place(bp)
@@ -532,6 +565,7 @@ async def designs_consent(req: DesignConsentRequest):
             raise HTTPException(400, "choose a template first")
         if bp.frozen:
             raise HTTPException(409, "unfreeze the blueprint to change it")
+        _guard(state, [k for k in ("landing", "web", "mobile") if brand.applicable(state, k)])
         bp.design_hints.generate_ok = bool(req.ok)
         await store.save_session(state)
         return state
@@ -557,7 +591,7 @@ async def designs_use_colours(req: SessionRequest):
     """Switch the brand colours to the ones read off the owner's designs."""
     async with session_lock(req.session_id, "blueprint"):
         state = await _get(req.session_id)
-        _editable(state)
+        _guard(state, "colours")
         c = state.brand.blueprint.design_hints.colors if state.brand.blueprint else {}
         if not c.get("primary"):
             raise HTTPException(400, "no colours were read from your designs")
@@ -571,18 +605,94 @@ async def designs_use_colours(req: SessionRequest):
 
 @router.post("/complete", response_model=SessionState)
 async def complete_identity(req: SessionRequest):
+    """Freeze Identity: every section at once (v1.0), or -- with a change
+    request open -- approve it as the next version."""
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        if brand.frozen(state):
+            return state
+        try:
+            brand.freeze_identity(state, design_import.identity_gate)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        if state.stage == "identity":
+            state.stage = "freeze"
+        await store.save_session(state)
+        return state
+
+
+# ---------------------------------------------------------------- Brand Studio (2026-10-13)
+@router.get("/{session_id}/brand")
+async def brand_status(session_id: str):
+    state = await _get(session_id)
+    b = state.brand
+    return {"sections": brand.status(state), "frozen": brand.frozen(state), "version": b.version or ("1.0" if b.completed else ""),
+            "change": b.change.model_dump(exclude={"before"}) if b.change else None,
+            "impacts": brand.impacts(state) if b.completed else [],
+            "history": [h.model_dump() for h in b.history], "standard_pages": brand.STANDARD_PAGES,
+            "dark": brand.dark_of(b.palette) if b.palette else None}
+
+
+@router.post("/section", response_model=SessionState)
+async def brand_section(req: SectionRequest):
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        try:
+            brand.set_section(state, req.key, req.action)
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        await store.save_session(state)
+        return state
+
+
+@router.post("/change/open", response_model=SessionState)
+async def change_open(req: ChangeOpenRequest):
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        try:
+            brand.open_change(state, req.sections, req.reason)
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        await store.save_session(state)
+        return state
+
+
+@router.post("/change/cancel", response_model=SessionState)
+async def change_cancel(req: SessionRequest):
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        try:
+            brand.cancel_change(state)
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        await store.save_session(state)
+        return state
+
+
+@router.post("/options", response_model=SessionState)
+async def brand_options(req: BrandOptionsRequest):
     state = await _get(req.session_id)
-    missing = [
-        label for label, ok in (
-            ("name", state.selected_name), ("tagline", state.brand.tagline),
-            ("colour theme", state.brand.palette), ("logo", state.brand.logo),
-            ("experience blueprint (choose, review and freeze it)", state.brand.blueprint and state.brand.blueprint.frozen),
-        ) if not ok
-    ]
-    if missing:
-        raise HTTPException(400, "still to choose: " + ", ".join(missing))
-    state.brand.completed = True
-    if state.stage == "identity":
-        state.stage = "freeze"
+    b = state.brand
+    if req.favicon_style is not None or req.favicon_letter is not None:
+        _guard(state, "logo")
+        if req.favicon_style in ("monogram", "logo"):
+            b.favicon_style = req.favicon_style
+        if req.favicon_letter is not None:
+            b.favicon_letter = re.sub(r"[<>&\"]", "", req.favicon_letter.strip())[:2]
+    if req.logo_placement is not None:
+        _guard(state, "theme")
+        if req.logo_placement not in ("left", "center"):
+            raise HTTPException(400, "logo placement is left or center")
+        b.logo_placement = req.logo_placement
     await store.save_session(state)
     return state
+
+
+@router.get("/{session_id}/favicon.svg")
+async def favicon(session_id: str):
+    from fastapi.responses import Response
+    state = await _get(session_id)
+    return Response(brand.favicon_svg(state), media_type="image/svg+xml",
+                    headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})

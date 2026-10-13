@@ -4,7 +4,7 @@ import { Network, LayoutTemplate, PackageCheck, Route } from 'lucide-react';
 import { ArrowRight, ArrowUpRight, Bell, Check, ChevronDown, ChevronRight, CircleHelp, Command, FileText, Layers3, Lightbulb, Menu, MessageCircle, MoreHorizontal, Plus, Rocket, Search, Sparkles, UsersRound, WandSparkles, X, Zap, BarChart3, ClipboardCheck, Target, PenLine } from 'lucide-react';
 import DiscoveryChat from './stages/DiscoveryChat.jsx';
 import ResearchCard from './stages/ResearchCard.jsx';
-import IdentityStudio from './stages/IdentityStudio.jsx';
+import BrandStudio from './stages/brand/BrandStudio.jsx';
 import ConceptConfirm from './stages/ConceptConfirm.jsx';
 import ScopeFreeze from './stages/ScopeFreeze.jsx';
 import StageReview from './stages/StageReview.jsx';
@@ -501,7 +501,7 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
           {reviewing && (
             <div className="review-banner" role="status">
               <Eye size={16} aria-hidden="true" />
-              <span>{['manager', 'techdesign', 'uiux', 'uxflow'].includes(viewStage) ? 'You are looking back at a baselined stage — unfreeze a document to change it, then re-baseline.' : 'You are looking back at a completed step — read-only.'}</span>
+              <span>{viewStage === 'identity' ? 'Identity is frozen — open a change request to edit it; approving it creates a new version.' : ['manager', 'techdesign', 'uiux', 'uxflow'].includes(viewStage) ? 'You are looking back at a baselined stage — unfreeze a document to change it, then re-baseline.' : 'You are looking back at a completed step — read-only.'}</span>
               <button type="button" className="btn-primary" onClick={() => setViewIndex(stageIndex)}>
                 Back to {STAGE_META[jStage].title} <ArrowRight size={15} />
               </button>
@@ -523,7 +523,7 @@ function WizardView({ session, setSession, requirements, setRequirements, onBack
                 {stage === 'discovery' && <DiscoveryChat session={session} setSession={setSession} />}
                 {stage === 'confirm' && <ConceptConfirm session={session} setSession={setSession} />}
                 {stage === 'research' && <ResearchCard session={session} setSession={setSession} />}
-                {stage === 'identity' && <IdentityStudio session={session} setSession={setSession} />}
+                {stage === 'identity' && <BrandStudio session={session} setSession={setSession} />}
                 {stage === 'freeze' && <ScopeFreeze session={session} setSession={setSession} />}
                 {stage === 'flow' && <ModuleFlowReview session={session} setSession={setSession} />}
                 {stage === 'generating' && (

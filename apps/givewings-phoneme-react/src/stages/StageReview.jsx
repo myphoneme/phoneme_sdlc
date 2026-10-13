@@ -4,6 +4,7 @@ import { FlowStepText } from "./RequirementDoc.jsx";
 import { ResearchReportView } from "./ResearchCard.jsx";
 import { IdentitySummary } from "./IdentityStudio.jsx";
 import ExperienceStep from "./ExperienceBlueprint.jsx";
+import BrandStudio from "./brand/BrandStudio.jsx";
 import { GenerationBoard } from "./Generating.jsx";
 import ReopenScope from "./ReopenScope.jsx";
 import BrdPrdManager from "./BrdPrdManager.jsx";
@@ -165,7 +166,7 @@ export default function StageReview({ stage, session, setSession, requirements, 
   if (stage === "uxflow") return <UXFlowStage session={session} setSession={setSession} />;
   if (stage === "discovery") return <DiscoveryReview session={session} />;
   if (stage === "research") return session.research ? <ResearchReportView research={session.research} /> : <Empty>No research recorded.</Empty>;
-  if (stage === "identity") return <IdentityReview session={session} setSession={setSession} />;
+  if (stage === "identity") return <BrandStudio session={session} setSession={setSession} />;
   if (stage === "freeze") return <ScopeReview session={session} setSession={setSession} requirements={requirements} />;
   if (stage === "flow") return <FlowReview session={session} />;
   if (stage === "generating") return <GenerationReview session={session} requirements={requirements} />;

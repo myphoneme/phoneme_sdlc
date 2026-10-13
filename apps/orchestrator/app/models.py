@@ -115,6 +115,11 @@ class Palette(BaseModel):
     surface: str = "#FFF7F0"
     accent: str = "#0F766E"
     rationale: str = ""
+    # 2026-10-13: the dark theme of the same brand ("" = derived automatically)
+    dark_primary: str = ""
+    dark_ink: str = ""
+    dark_surface: str = ""
+    dark_accent: str = ""
 
 
 class LogoConcept(BaseModel):
@@ -201,6 +206,23 @@ class ExperienceBlueprint(BaseModel):
     design_hints: DesignHints = DesignHints()
 
 
+class IdentityChange(BaseModel):
+    """2026-10-13: a change request on a frozen Identity. The sections named
+    reopen; approving it re-freezes Identity as the next version, and every
+    stage drawn in the brand (UI/UX, UX flow) must be re-approved."""
+    sections: list[str] = []
+    reason: str = ""
+    opened_at: str = ""
+    impacts: list[str] = []
+    before: dict = {}  # brand as it was, restored if the request is withdrawn
+
+
+class IdentityVersion(BaseModel):
+    version: str
+    at: str
+    summary: str = ""
+
+
 class BrandIdentity(BaseModel):
     domains: list[DomainCheck] = []
     domain_checked_name: Optional[str] = None
@@ -213,7 +235,18 @@ class BrandIdentity(BaseModel):
     logo_options: list[LogoConcept] = []
     logo: Optional[LogoConcept] = None
     blueprint: Optional[ExperienceBlueprint] = None
-    completed: bool = False
+    completed: bool = False  # Identity frozen
+    # 2026-10-13 Brand Studio: seven sections, each frozen on its own while
+    # Identity is open (free edits, no version); once Identity is frozen every
+    # change is a change request that bumps the version.
+    sections: dict[str, str] = {}  # section key -> "frozen"
+    favicon_style: str = "monogram"  # monogram | logo
+    favicon_letter: str = ""
+    logo_placement: str = "left"  # left | center -- standard modules only inherit this
+    version: str = ""
+    frozen_at: str = ""
+    change: Optional[IdentityChange] = None
+    history: list[IdentityVersion] = []
 
 
 class GenerationItem(BaseModel):
@@ -444,6 +477,25 @@ class ChooseRequest(BaseModel):
     """Generic 'pick this value' request for the identity sub-steps."""
     session_id: str
     value: str
+
+
+class SectionRequest(BaseModel):
+    session_id: str
+    key: str
+    action: str = "freeze"  # freeze | unfreeze
+
+
+class ChangeOpenRequest(BaseModel):
+    session_id: str
+    sections: list[str]
+    reason: str = ""
+
+
+class BrandOptionsRequest(BaseModel):
+    session_id: str
+    favicon_style: Optional[str] = None
+    favicon_letter: Optional[str] = None
+    logo_placement: Optional[str] = None
 
 
 class PaletteRequest(BaseModel):
