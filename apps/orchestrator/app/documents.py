@@ -68,6 +68,13 @@ async def render(state, doc_types=("brdprd", "techdesign", "uiux", "uxflow")) ->
                         mod = re.sub(r"[^A-Za-z0-9]+", "_", m.module).strip("_")
                         nm = re.sub(r"[^A-Za-z0-9]+", "_", sc.name).strip("_") or sc.asset_id
                         out.append((f"{export.product_slug(state)}/UI-UX/designs/{mod}/{nm}{p.suffix}", p.read_bytes()))
+        bp = state.brand.blueprint if state.brand else None
+        for f in (bp.design_files if bp else []):  # the owner's uploads, as uploaded
+            from . import design_import
+            src = design_import.source_path(state.session_id, f)
+            if src.exists():
+                nm = re.sub(r"[^A-Za-z0-9._-]+", "_", f.name).strip("_") or f"{f.file_id}.{f.ext}"
+                out.append((f"{export.product_slug(state)}/UI-UX/designs/Source/{nm}", src.read_bytes()))
     if "uxflow" in doc_types and any(f.doc for f in state.ux_flows):
         from . import uxflow as uxf
         from .routers import uxflow

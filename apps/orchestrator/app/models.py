@@ -169,9 +169,22 @@ class DesignAsset(BaseModel):
     status: str = "placed"   # placed | unsure | business (matched to modules at UI/UX) | ignored
     width: int = 0
     height: int = 0
+    file_id: str = ""        # the uploaded file it came from (2026-10-13)
+    read: dict = {}          # what the AI read off it (kept so later uploads re-fill the blueprint from all screens)
     module: str = ""         # UI/UX module this screen was matched to (step 2)
     module_conf: float = 0.0  # AI match confidence; -1 = decided by the owner
     applied: str = ""        # screen_id it became inside that module
+
+
+class DesignFile(BaseModel):
+    """2026-10-13: one file the owner uploaded (an image, a board or a zip),
+    kept as uploaded in the product's design folder."""
+    file_id: str
+    name: str
+    size: int = 0
+    ext: str = "png"
+    uploaded_at: str = ""
+    screens: int = 0
 
 
 class DesignHints(BaseModel):
@@ -202,7 +215,8 @@ class ExperienceBlueprint(BaseModel):
     version: str = ""  # set when frozen: 1.0, 1.1 ...
     frozen: bool = False
     frozen_at: str = ""
-    designs: list[DesignAsset] = []   # the owner's own designs (server-managed)
+    designs: list[DesignAsset] = []
+    design_files: list[DesignFile] = []   # the owner's own designs (server-managed)
     design_hints: DesignHints = DesignHints()
 
 
@@ -745,6 +759,11 @@ class DesignConsentRequest(BaseModel):
     session_id: str
     ui_id: str = ""    # a UI/UX module; empty = the Identity frame
     ok: bool = True
+
+
+class DesignFileRequest(BaseModel):
+    session_id: str
+    file_id: str
 
 
 class DesignUpdateRequest(BaseModel):

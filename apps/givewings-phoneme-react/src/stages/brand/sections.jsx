@@ -103,7 +103,10 @@ export function ColoursSection({ session, run, busy, locked, pal, setPal }) {
   const b = session.brand || {};
   const sid = session.session_id;
   useEffect(() => {
-    if (!locked && !b.palette_options?.length && !busy) run("Designing colour palettes…", () => api.genPalettes(sid));
+    const hasDesigns = (b.blueprint?.designs || []).some((d) => d.status !== "ignored");
+    const fromDesigns = (b.palette_options || []).some((o) => o.name === "From your designs");
+    if (!locked && hasDesigns && !fromDesigns && !busy) run("Reading colours from your designs…", () => api.useDesignColours(sid));
+    else if (!locked && !b.palette_options?.length && !busy) run("Designing colour palettes…", () => api.genPalettes(sid));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const p = pal || PRESETS[0];
@@ -121,7 +124,7 @@ export function ColoursSection({ session, run, busy, locked, pal, setPal }) {
           <button key={o.name + i} type="button" className={"palette-card sm" + (p.name === o.name ? " selected" : "")} onClick={() => setPal(o)}>
             <span className="swatches" aria-hidden="true">{["primary", "ink", "surface", "accent"].map((k) => <i key={k} style={{ background: o[k] }} />)}</span>
             <span className="swatches dark" aria-hidden="true">{["primary", "ink", "surface", "accent"].map((k) => <i key={k} style={{ background: darkOf(o)[k] }} />)}</span>
-            <strong>{o.name}</strong>{i < (b.palette_options || []).length && <span className="chip accent">AI</span>}
+            <strong>{o.name}</strong>{o.name === "From your designs" ? <span className="chip good">Your designs</span> : i < (b.palette_options || []).length && <span className="chip accent">AI</span>}
           </button>
         ))}
       </div>

@@ -209,14 +209,43 @@ async def run():
         cov = (await c.get(f"/api/identity/{sid}/designs/coverage")).json()
         st = {x["slot"]: x["status"] for x in cov["slots"]}
         assert st["landing"] == "placed" and st["sign_in"] == "unsure" and st["tab:Home"] == "placed" and st["tab:Library"] == "placed" and st["share"] == "placed", st
-        assert st["tab:Create"] == "generate" and st["sign_up"] == "generate" and cov["palette_differs"], cov
+        assert st["tab:Create"] == "generate" and st["sign_up"] == "generate" and not cov["palette_differs"], cov
+        # colours come from the designs by default (2026-10-13)
+        assert s["brand"]["palette"]["name"] == "From your designs" and s["brand"]["palette"]["primary"] == "#FF6254", s["brand"]["palette"]
+        assert s["brand"]["palette_options"][0]["name"] == "From your designs"
+        from app import design_import as _di
+        pxp = _di.pixel_palette([_di.path_of(sid, d["design_id"]) for d in ds])
+        assert pxp.get("primary", "").startswith("#") and pxp.get("accent"), pxp
+        # the uploaded files are kept and managed (2026-10-13)
+        fl = (await c.get(f"/api/identity/{sid}/designs/files")).json()
+        assert fl["folder"] == "RelayReel / Designs" and sum(x["screens"] for x in fl["files"]) == 5 and all(x["kept"] for x in fl["files"]), fl
+        src = await c.get(f"/api/identity/{sid}/designs/source/{fl['files'][0]['file_id']}"); assert src.status_code == 200 and len(src.content) > 100
+        from PIL import Image as _I
+        import io as _io
+        extra = _io.BytesIO(); _I.new("RGB", (1440, 900), (240, 200, 40)).save(extra, "PNG")
+        up = await c.post(f"/api/identity/{sid}/designs", files=[("files", ("second-landing.png", extra.getvalue(), "image/png"))]); assert up.status_code == 200, up.text
+        for _ in range(100):
+            s = (await c.get(f"/api/discovery/{sid}")).json()
+            if s["design_import"]["status"] != "running": break
+            await asyncio.sleep(0.05)
+        fl = (await c.get(f"/api/identity/{sid}/designs/files")).json(); assert len(s["brand"]["blueprint"]["designs"]) == 6, fl
+        assert s["brand"]["blueprint"]["platforms"] == "both" and s["brand"]["blueprint"]["mobile"]["tabs"] == ["Home", "Library", "Create", "Profile"]   # re-filled from all screens, not just the new one
+        new_f = next(x for x in fl["files"] if x["name"] == "second-landing.png")
+        s = await post("/api/identity/designs/files/reread", {"session_id": sid, "file_id": new_f["file_id"]})
+        for _ in range(100):
+            s = (await c.get(f"/api/discovery/{sid}")).json()
+            if s["design_import"]["status"] != "running": break
+            await asyncio.sleep(0.05)
+        s = await post("/api/identity/designs/files/remove", {"session_id": sid, "file_id": new_f["file_id"]})
+        assert len(s["brand"]["blueprint"]["designs"]) == 5 and all(f["file_id"] != new_f["file_id"] for f in s["brand"]["blueprint"]["design_files"])
+        await post("/api/identity/designs/files/remove", {"session_id": sid, "file_id": "nope"}, 404)
         signin = next(d for d in ds if d["kind"] == "sign_in")
         s = await post("/api/identity/designs/update", {"session_id": sid, "design_id": signin["design_id"], "slot": "sign_in"})
         assert next(d for d in s["brand"]["blueprint"]["designs"] if d["design_id"] == signin["design_id"])["status"] == "placed"
         await post("/api/identity/designs/update", {"session_id": sid, "design_id": signin["design_id"], "slot": "nowhere"}, 400)
         f = await c.get(f"/api/identity/{sid}/designs/file/{signin['design_id']}"); assert f.status_code == 200 and f.headers["content-type"] == "image/png"
         s = await post("/api/identity/designs/use-colours", {"session_id": sid}); assert s["brand"]["palette"]["primary"] == "#FF6254"
-        s = await post("/api/identity/palette", {"session_id": sid, "palette": s["brand"]["palette_options"][0]})   # back to the teal brand
+        s = await post("/api/identity/palette", {"session_id": sid, "palette": next(o for o in s["brand"]["palette_options"] if o["name"] == "Teal Tide")})   # back to the teal brand
         s = await post("/api/identity/logos", {"session_id": sid}); await post("/api/identity/logo", {"session_id": sid, "logo_id": s["brand"]["logo_options"][0]["id"]})
         stale = dict(s["brand"]["blueprint"]); stale["designs"] = []
         s = await post("/api/identity/blueprint", {"session_id": sid, "blueprint": stale}); assert len(s["brand"]["blueprint"]["designs"]) == 5   # server-managed

@@ -2,9 +2,33 @@
 // the browser from the draft palette and blueprint, so every change shows the
 // moment it is made — in light and dark, on the web and on a phone.
 import { Bell, Check, ChevronRight, Home, Image as ImageIcon, Lock, Plus, Search, Share2, User } from "lucide-react";
+import { useState } from "react";
 import { svgSrc, themeVars, useFonts } from "./kit.js";
 
 const PAGE_TYPES = ["List", "Detail", "Form", "Empty state", "Settings"];
+const SLOT_LABEL = { landing: "Landing page", sign_in: "Sign in", sign_up: "Create account", onboarding: "Welcome / first run", share: "Share sheet", web_home: "Web app home" };
+const slotLabel = (k) => SLOT_LABEL[k] || (k.startsWith("tab:") ? `Phone tab · ${k.slice(4)}` : k);
+// The owner's design placed in a frame slot, if any.
+const inSlot = (bp, slot) => (bp?.designs || []).find((d) => d.slot === slot && (d.status === "placed" || d.status === "unsure"));
+
+function Shot({ d, asset, phone }) {
+  return <div className={"bv-shotwrap" + (phone ? " phone" : "")}><img className="bv-shot" src={asset(d.design_id)} alt={d.title || "Your design"} loading="lazy" /><span className="bv-yours">Your design</span></div>;
+}
+
+// "Your design" vs the same page generated in the brand theme.
+function Either({ d, asset, children, phone }) {
+  const [mine, setMine] = useState(true);
+  if (!d) return children;
+  return (
+    <div className="bv-either">
+      <span className="seg sm bv-either-seg" role="radiogroup">
+        <button type="button" role="radio" aria-checked={mine} className={mine ? "on" : ""} onClick={() => setMine(true)}>Your design</button>
+        <button type="button" role="radio" aria-checked={!mine} className={!mine ? "on" : ""} onClick={() => setMine(false)}>Generated in your theme</button>
+      </span>
+      {mine ? <Shot d={d} asset={asset} phone={phone} /> : children}
+    </div>
+  );
+}
 
 function Mark({ session, size = 22 }) {
   const logo = session.brand?.logo;
@@ -99,7 +123,7 @@ function LogoPreview({ session, favicon }) {
 
 const SECTION_LABEL = { hero: "Hero", promise: "Promise", features: "How it works", download: "Download the app", pricing: "Plans & pricing", faq: "FAQ", cta: "Closing call to action" };
 
-function LandingPreview({ session, bp, favicon, phone }) {
+function LandingPreview({ session, bp, favicon, phone, asset }) {
   const b = session.brand || {};
   const parts = (bp?.landing_sections || ["hero"]).map((k) => {
     switch (k) {
@@ -114,6 +138,8 @@ function LandingPreview({ session, bp, favicon, phone }) {
     }
   });
   const nav = <div className="bv-pubnav"><Mark session={session} size={20} />{!phone && <span className="bv-links">{(bp?.public_pages || []).filter((p) => p !== "Landing").slice(0, 4).map((p) => <span key={p}>{p}</span>)}</span>}<span className="bv-row"><Btn kind="ghost">Sign in</Btn>{!phone && <Btn>Get started</Btn>}</span></div>;
+  const land = inSlot(bp, "landing");
+  if (land && !phone) return <Browser session={session} favicon={favicon}><Either d={land} asset={asset}><div className="bv-zoom">{nav}{parts}<div className="bv-foot">© {session.selected_name} · Privacy · Terms</div></div></Either></Browser>;
   if (phone) return <div className="bv-phone landing"><div className="bv-status"><span>9:41</span><span>●●● ▮</span></div>{nav}<div className="bv-pbody">{parts}</div></div>;
   return <Browser session={session} favicon={favicon}><div className="bv-zoom">{nav}{parts}<div className="bv-foot">© {session.selected_name} · Privacy · Terms</div></div></Browser>;
 }
@@ -145,11 +171,19 @@ function AppShell({ session, bp, children, active = 0 }) {
   );
 }
 
-function WebPreview({ session, bp, favicon }) {
+function WebPreview({ session, bp, favicon, asset }) {
+  const home = inSlot(bp, "web_home");
+  const mine = (bp?.designs || []).filter((d) => d.platform === "web" && d.status === "business");
   return (
     <>
-      <Browser session={session} favicon={favicon} path="/app"><div className="bv-zoom"><AppShell session={session} bp={bp}><PageBody type={bp?.web?.home || "dashboard"} session={session} /></AppShell></div></Browser>
-      <h6 className="bv-h6">Page catalogue — every module page is drawn from these</h6>
+      <Browser session={session} favicon={favicon} path="/app">
+        <Either d={home} asset={asset}><div className="bv-zoom"><AppShell session={session} bp={bp}><PageBody type={bp?.web?.home || "dashboard"} session={session} /></AppShell></div></Either>
+      </Browser>
+      {mine.length > 0 && <>
+        <h6 className="bv-h6">Your web pages — become module screens at UI/UX</h6>
+        <div className="bv-catalogue">{mine.map((d) => <figure key={d.design_id}><Shot d={d} asset={asset} /><figcaption>{d.title}</figcaption></figure>)}</div>
+      </>}
+      <h6 className="bv-h6">Page catalogue in your theme — every other module page is drawn from these</h6>
       <div className="bv-catalogue">
         {PAGE_TYPES.map((t) => <figure key={t}><div className="bv-mini"><AppShell session={session} bp={bp} active={1}><PageBody type={t} session={session} /></AppShell></div><figcaption>{t}</figcaption></figure>)}
       </div>
@@ -157,17 +191,65 @@ function WebPreview({ session, bp, favicon }) {
   );
 }
 
-function MobilePreview({ session, bp }) {
+function MobilePreview({ session, bp, asset }) {
   const tabs = bp?.mobile?.tabs?.length ? bp.mobile.tabs : ["Home", "Library", "Create", "Profile"];
-  const pages = [["dashboard", 0, tabs[0]], ["List", Math.min(1, tabs.length - 1), tabs[1]], ["Detail", Math.min(1, tabs.length - 1), "Item"], ["Form", Math.min(2, tabs.length - 1), tabs[2] || "Create"]];
+  const types = ["dashboard", "List", "Form", "Settings", "Detail"];
+  const share = inSlot(bp, "share");
+  const mine = (bp?.designs || []).filter((d) => d.platform === "phone" && d.status === "business");
   return (
-    <div className="bv-phones">
-      {pages.map(([type, act, title]) => <figure key={type}><Phone session={session} tabs={tabs} active={act} title={title}><PageBody type={type} session={session} /></Phone><figcaption>{type === "dashboard" ? "Home" : type}</figcaption></figure>)}
-      {bp?.mobile?.share_target && (
-        <figure><div className="bv-phone share"><div className="bv-status"><span>9:41</span><span>●●● ▮</span></div><div className="bv-pbody dim" /><div className="bv-sheetup"><b>Share to</b><div className="bv-row"><span className="bv-shareapp"><Mark session={session} size={14} /></span><span className="bv-shareapp ghost" /><span className="bv-shareapp ghost" /></div><Btn>Save to {session.selected_name}</Btn></div></div><figcaption>Share sheet</figcaption></figure>
-      )}
+    <>
+      <div className="bv-phones">
+        {tabs.slice(0, 5).map((t, i) => {
+          const d = inSlot(bp, `tab:${t}`);
+          return (
+            <figure key={t}>
+              {d ? <Shot d={d} asset={asset} phone /> : <Phone session={session} tabs={tabs} active={i} title={t}><PageBody type={types[i] || "List"} session={session} /></Phone>}
+              <figcaption>{t} tab · {d ? "your design" : "generated"}</figcaption>
+            </figure>
+          );
+        })}
+        {bp?.mobile?.share_target && (
+          <figure>
+            {share ? <Shot d={share} asset={asset} phone /> : <div className="bv-phone share"><div className="bv-status"><span>9:41</span><span>●●● ▮</span></div><div className="bv-pbody dim" /><div className="bv-sheetup"><b>Share to</b><div className="bv-row"><span className="bv-shareapp"><Mark session={session} size={14} /></span><span className="bv-shareapp ghost" /><span className="bv-shareapp ghost" /></div><Btn>Save to {session.selected_name}</Btn></div></div>}
+            <figcaption>Share sheet · {share ? "your design" : "generated"}</figcaption>
+          </figure>
+        )}
+      </div>
+      {mine.length > 0 && <>
+        <h6 className="bv-h6">Your phone screens — become module screens at UI/UX</h6>
+        <div className="bv-phones">{mine.map((d) => <figure key={d.design_id}><Shot d={d} asset={asset} phone /><figcaption>{d.title}</figcaption></figure>)}</div>
+      </>}
+    </>
+  );
+}
+
+// Brand theme: the palette and type applied to the web and to the phone, side by side.
+function ThemeOnDevices({ session, bp }) {
+  const tabs = bp?.mobile?.tabs?.length ? bp.mobile.tabs : ["Home", "Library", "Create", "Profile"];
+  const web = bp?.platforms !== "mobile", phone = bp?.platforms !== "web";
+  return (
+    <div className={"bv-devices" + (web && phone ? "" : " one")}>
+      {web && <figure><div className="bv-mini wide"><AppShell session={session} bp={bp}><PageBody type="dashboard" session={session} /></AppShell></div><figcaption>Web</figcaption></figure>}
+      {phone && <figure><Phone session={session} tabs={tabs} active={0} title={tabs[0]}><PageBody type="dashboard" session={session} /></Phone><figcaption>Phone</figcaption></figure>}
     </div>
   );
+}
+
+function DesignsGallery({ bp, asset }) {
+  const ds = bp?.designs || [];
+  if (!ds.length) return <div className="bv-empty"><b>No designs uploaded yet</b><p className="bv-mut">Upload your web and phone designs on the left — they appear here, sorted into the sections.</p></div>;
+  const groups = [
+    ["In the frame", ds.filter((d) => d.slot && d.status !== "ignored")],
+    ["For the modules", ds.filter((d) => !d.slot && d.status === "business")],
+    ["To check", ds.filter((d) => !d.slot && d.status === "unsure")],
+    ["Left out", ds.filter((d) => d.status === "ignored")],
+  ].filter(([, list]) => list.length);
+  return groups.map(([label, list]) => (
+    <div key={label} className="bv-gal">
+      <h6 className="bv-h6">{label} · {list.length}</h6>
+      <div className="bv-catalogue">{list.map((d) => <figure key={d.design_id}><Shot d={d} asset={asset} phone={d.platform === "phone"} /><figcaption>{d.slot ? slotLabel(d.slot) : d.title}</figcaption></figure>)}</div>
+    </div>
+  ));
 }
 
 export function StandardPreview({ session, bp, placement = "left", phone }) {
@@ -191,22 +273,24 @@ export function StandardPreview({ session, bp, placement = "left", phone }) {
   return <div className={"bv-standard" + (phone ? " phone" : "")}>{cards.map(([t, c]) => <figure key={t}>{c}<figcaption>{t}</figcaption></figure>)}</div>;
 }
 
-export default function BrandPreview({ section, session, palette, bp, mode, device, favicon }) {
+export default function BrandPreview({ section, session, palette, bp, mode, device, favicon, asset }) {
   useFonts([bp?.tokens?.heading_font, bp?.tokens?.body_font]);
   const p = palette || { primary: "#C2410C", ink: "#171717", surface: "#FFF7F0", accent: "#0F766E" };
   const placement = session.brand?.logo_placement || "left";
   const phone = device === "phone";
+  const hasShots = (bp?.designs || []).length > 0;
   const wrap = (m, child, label) => <div className={`bv bv-${m}`} style={themeVars(p, m, bp?.tokens)}>{label && <span className="bv-mode">{label}</span>}{child}</div>;
-  let body;
   if (section === "colours") {
     return <div className="bv-split">{wrap("light", <ThemeSheet session={session} />, "Light")}{wrap("dark", <ThemeSheet session={session} />, "Dark")}</div>;
-  } else if (section === "name") body = <NamePreview session={session} favicon={favicon} />;
+  }
+  let body;
+  if (section === "name") body = <NamePreview session={session} favicon={favicon} />;
   else if (section === "logo") body = <LogoPreview session={session} favicon={favicon} />;
-  else if (section === "theme") body = <><ThemeSheet session={session} /><h6 className="bv-h6">Standard modules inherit this theme and your logo</h6><StandardPreview session={session} bp={bp} placement={placement} phone={phone} /></>;
-  else if (section === "landing" || section === "designs") body = <LandingPreview session={session} bp={bp} favicon={favicon} phone={phone} />;
-  else if (section === "web") body = <WebPreview session={session} bp={bp} favicon={favicon} />;
-  else if (section === "mobile") body = <MobilePreview session={session} bp={bp} />;
+  else if (section === "theme") body = <><ThemeSheet session={session} /><h6 className="bv-h6">Your palette on the web and on the phone</h6><ThemeOnDevices session={session} bp={bp} /><h6 className="bv-h6">Standard modules inherit this theme and your logo</h6><StandardPreview session={session} bp={bp} placement={placement} phone={phone} /></>;
+  else if (section === "designs") body = <DesignsGallery bp={bp} asset={asset} />;
+  else if (section === "landing") body = <LandingPreview session={session} bp={bp} favicon={favicon} phone={phone} asset={asset} />;
+  else if (section === "web") body = <WebPreview session={session} bp={bp} favicon={favicon} asset={asset} />;
+  else if (section === "mobile") body = <MobilePreview session={session} bp={bp} asset={asset} />;
   else if (section === "standard") body = <StandardPreview session={session} bp={bp} placement={placement} phone={phone} />;
-  return wrap(mode, body);
+  return <>{wrap(mode, body)}{hasShots && mode === "dark" && ["landing", "web", "mobile", "designs"].includes(section) && <p className="bv-note">Your uploaded designs are shown as drawn; the generated pages switch to dark.</p>}</>;
 }
-

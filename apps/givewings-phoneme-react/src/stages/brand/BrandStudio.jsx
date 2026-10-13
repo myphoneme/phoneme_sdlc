@@ -10,7 +10,7 @@ import {
   AlertTriangle, ArrowRight, Check, CircleDashed, ExternalLink, GitPullRequest, Globe, ImageUp, LayoutTemplate, Lock, LockOpen,
   Moon, Palette as PaletteIcon, Shapes, ShieldCheck, Smartphone, Sun, Type, Undo2, X,
 } from "lucide-react";
-import { api } from "../../api.js";
+import { api, fileUrl } from "../../api.js";
 import DesignImport from "../DesignImport.jsx";
 import BrandPreview from "./BrandPreview.jsx";
 import { ColoursSection, LandingSection, LogoSection, MobileSection, NameSection, PRESETS, ThemeSection, WebSection } from "./sections.jsx";
@@ -86,6 +86,8 @@ export default function BrandStudio({ session, setSession }) {
   const [mode, setMode] = useState("light");
   const [device, setDevice] = useState("web");
   const [askChange, setAskChange] = useState(false);
+  const pvRef = useRef(null);
+  useEffect(() => { if (pvRef.current) pvRef.current.scrollTop = 0; }, [active]);
   const [nameDraft, setNameDraft] = useState(null); // typed but not yet saved: shown live in the preview
 
   const sig = JSON.stringify([b.sections, b.change?.sections, b.version, b.completed, b.palette, b.logo?.id, b.tagline, session.selected_name,
@@ -253,7 +255,7 @@ export default function BrandStudio({ session, setSession }) {
               <button type="button" role="radio" aria-checked={mode === "light"} className={mode === "light" ? "on" : ""} onClick={() => setMode("light")}><Sun size={13} /> Light</button>
               <button type="button" role="radio" aria-checked={mode === "dark"} className={mode === "dark" ? "on" : ""} onClick={() => setMode("dark")}><Moon size={13} /> Dark</button>
             </span>
-            {["landing", "theme", "standard", "designs"].includes(active) && (
+            {["landing", "theme", "standard"].includes(active) && (
               <span className="seg sm" role="radiogroup" aria-label="Device">
                 <button type="button" role="radio" aria-checked={device === "web"} className={device === "web" ? "on" : ""} onClick={() => setDevice("web")}><Globe size={13} /> Web</button>
                 <button type="button" role="radio" aria-checked={device === "phone"} className={device === "phone" ? "on" : ""} onClick={() => setDevice("phone")}><Smartphone size={13} /> Phone</button>
@@ -261,8 +263,9 @@ export default function BrandStudio({ session, setSession }) {
             )}
             {b.blueprint && ["landing", "web", "mobile"].includes(active) && <a className="link-btn" href={api.blueprintPreviewUrl(sid)} target="_blank" rel="noreferrer"><ExternalLink size={12} /> Clickable</a>}
           </div>
-          <div className="bs-pv-body">
-            <BrandPreview section={active} session={nameDraft ? { ...session, selected_name: nameDraft.name || session.selected_name, brand: { ...b, tagline: nameDraft.tagline || b.tagline } } : session} palette={pal} bp={bp} mode={mode} device={device} favicon={favicon} />
+          <div className="bs-pv-body" ref={pvRef}>
+            <p className="bs-pv-label">Previewing: <b>{title}</b></p>
+            <BrandPreview asset={(id) => fileUrl(`/identity/${sid}/designs/file/${id}`)} section={active} session={nameDraft ? { ...session, selected_name: nameDraft.name || session.selected_name, brand: { ...b, tagline: nameDraft.tagline || b.tagline } } : session} palette={pal} bp={bp} mode={mode} device={device} favicon={favicon} />
           </div>
         </aside>
       </div>

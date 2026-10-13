@@ -30,7 +30,7 @@ from collections import Counter, deque
 from pathlib import Path
 
 from . import ai_router, blueprint, config, reqdoc, store
-from .models import DesignAsset, DesignHints, GenerationItem, GenerationProgress
+from .models import DesignAsset, DesignFile, DesignHints, GenerationItem, GenerationProgress, Palette
 
 logger = logging.getLogger("phoneme.design_import")
 
@@ -64,22 +64,22 @@ def _image(data: bytes):
     return im.convert("RGB")
 
 
-def unpack(files: list[tuple[str, bytes]]) -> list[tuple[str, object]]:
-    """(name, bytes) uploads -> (name, PIL image); zips are opened (images only)."""
+def unpack(files: list[tuple[str, bytes]]) -> list[tuple[str, object, int]]:
+    """(name, bytes) uploads -> (name, PIL image, upload index); zips are opened (images only)."""
     out = []
-    for name, data in files:
+    for idx, (name, data) in enumerate(files):
         if data[:4] == b"PK\x03\x04":
             with zipfile.ZipFile(io.BytesIO(data)) as z:
                 for info in z.infolist()[:60]:
                     if info.is_dir() or info.file_size > MAX_BYTES or not re.search(r"\.(png|jpe?g|webp|gif)$", info.filename, re.I):
                         continue
                     try:
-                        out.append((Path(info.filename).name, _image(z.read(info))))
+                        out.append((Path(info.filename).name, _image(z.read(info)), idx))
                     except Exception:  # noqa: BLE001 -- skip unreadable members
                         continue
             continue
         try:
-            out.append((name, _image(data)))
+            out.append((name, _image(data), idx))
         except Exception:  # noqa: BLE001
             raise ValueError(f"{name}: not an image GiveWings can read (PNG, JPG, WebP, GIF or a zip of them)")
     return out
@@ -371,27 +371,55 @@ def coverage(state) -> dict:
 
 
 # ------------------------------------------------------------------ background run
+def source_dir(session_id: str) -> Path:
+    return folder(session_id) / "source"
+
+
+def source_path(session_id: str, f: DesignFile) -> Path:
+    return source_dir(session_id) / f"{f.file_id}.{f.ext}"
+
+
+def _ext(name: str, data: bytes) -> str:
+    if data[:4] == b"PK\x03\x04":
+        return "zip"
+    m = re.search(r"\.(png|jpe?g|webp|gif)$", name or "", re.I)
+    return (m.group(1).lower().replace("jpeg", "jpg") if m else "png")
+
+
 async def start(session_id: str, files: list[tuple[str, bytes]]) -> None:
-    """Split the uploads into screens now (fast), read them in the background."""
+    """Keep every upload as-is in the product's design folder, split it into
+    screens now (fast) and read the screens in the background."""
     state = await store.get_session(session_id)
     images = unpack(files)
     if not images:
         raise ValueError("no images found in the upload")
     d = folder(session_id)
     d.mkdir(parents=True, exist_ok=True)
+    src = source_dir(session_id)
+    src.mkdir(parents=True, exist_ok=True)
+    bp = state.brand.blueprint
+    records = []
+    for name, data in files:
+        f = DesignFile(file_id=uuid.uuid4().hex[:12], name=(name or "design")[:120], size=len(data), ext=_ext(name, data), uploaded_at=_now())
+        records.append(f)
     new = []
-    for name, img in images:
+    for name, img, idx in images:
         for box in await split(img):
-            if len(new) + len(state.brand.blueprint.designs) >= MAX_SCREENS:
+            if len(new) + len(bp.designs) >= MAX_SCREENS:
                 break
             crop = img.crop(box)
             did = uuid.uuid4().hex[:12]
             (d / f"{did}.png").write_bytes(png(crop, 1600))
             new.append(DesignAsset(design_id=did, original=name, width=crop.width, height=crop.height, status="unsure",
-                                   title=Path(name).stem[:60]))
+                                   title=Path(name).stem[:60], file_id=records[idx].file_id))
+            records[idx].screens += 1
     if not new:
         raise ValueError(f"at most {MAX_SCREENS} designs per product — remove some first")
-    state.brand.blueprint.designs += new
+    for (name, data), f in zip(files, records):
+        if f.screens:
+            source_path(session_id, f).write_bytes(data)
+            bp.design_files.append(f)
+    bp.designs += new
     state.design_import = GenerationProgress(
         status="running", total=len(new), done=0, started_at=_now(), updated_at=_now(),
         items=[GenerationItem(module=a.original, req_id=a.design_id) for a in new])
@@ -439,17 +467,20 @@ async def _read_all(session_id: str, ids: list[str]) -> None:
                 a.confidence = 0.5
             if r.get("is_screen") is False:
                 a.status = "ignored"
+            a.read = {k: r[k] for k in ("platform", "kind", "tab", "tabs", "nav", "landing_sections", "sign_in_methods", "register_fields",
+                                        "colors", "heading_font", "body_font", "radius", "density", "is_screen") if k in r}
         elif a.design_id in errors:
             a.platform = "phone" if a.height > a.width * 1.3 else "web"
             a.description = "Could not be read automatically — sort it yourself."
             a.confidence = 0.0
     if not bp.frozen:
-        all_reads = [{**reads[a.design_id], "platform": a.platform, "kind": a.kind}
-                     for a in bp.designs if a.design_id in reads and a.status != "ignored"]
+        all_reads = [{**(reads.get(a.design_id) or a.read), "platform": a.platform, "kind": a.kind}
+                     for a in bp.designs if (a.design_id in reads or a.read) and a.status != "ignored"]
         fill_blueprint(bp, all_reads)
         state.brand.blueprint = blueprint.normalise(bp)
         bp = state.brand.blueprint
     place(bp)
+    offer_palette(state)
     g = state.design_import
     for it in g.items:
         it.status = "failed" if it.req_id in errors else "done"
@@ -637,3 +668,163 @@ def style_text(state) -> str:
     if done:
         bits.append("the owner's own screens already exist for: " + "; ".join(done))
     return "The owner supplied their own designs. Generate anything missing in that same look -- " + "; ".join(bits) + "."
+
+
+# ------------------------------------------------------------------ colours from the designs (2026-10-13)
+def _hsl(rgb):
+    import colorsys
+    r, g, b = (v / 255 for v in rgb)
+    h, lt, sat = colorsys.rgb_to_hls(r, g, b)
+    return h * 360, sat, lt
+
+
+def pixel_palette(paths: list[Path]) -> dict:
+    """Dominant colours of the screens themselves: the most used saturated
+    colour is the brand primary, the most used light one the background, the
+    most used dark one the text, and a second saturated hue the accent."""
+    from PIL import Image
+    counts: Counter = Counter()
+    for p in paths[:20]:
+        try:
+            im = Image.open(p).convert("RGB")
+        except Exception:  # noqa: BLE001
+            continue
+        im.thumbnail((96, 96))
+        q = im.quantize(colors=10, method=Image.Quantize.MEDIANCUT)
+        pal = q.getpalette()
+        for n, i in q.getcolors() or []:
+            counts[tuple(pal[i * 3:i * 3 + 3])] += n
+    if not counts:
+        return {}
+    hexs = lambda c: "#" + "".join(f"{v:02X}" for v in c)  # noqa: E731
+    sat = [(n, c) for c, n in counts.items() if _hsl(c)[1] > 0.35 and 0.18 < _hsl(c)[2] < 0.78]
+    light = [(n, c) for c, n in counts.items() if _hsl(c)[2] > 0.86]
+    dark = [(n, c) for c, n in counts.items() if _hsl(c)[2] < 0.22]
+    out = {}
+    if sat:
+        sat.sort(reverse=True)
+        out["primary"] = hexs(sat[0][1])
+        h0 = _hsl(sat[0][1])[0]
+        acc = next((c for n, c in sat[1:] if min(abs(_hsl(c)[0] - h0), 360 - abs(_hsl(c)[0] - h0)) > 40), None)
+        if acc:
+            out["accent"] = hexs(acc)
+    if light:
+        out["surface"] = hexs(max(light)[1])
+    if dark:
+        out["ink"] = hexs(max(dark)[1])
+    return out
+
+
+def design_palette(state) -> Palette | None:
+    """A palette made from the owner's designs: what the AI read off the
+    screens, completed by their dominant pixel colours."""
+    bp = state.brand.blueprint
+    live = [a for a in bp.designs if a.status != "ignored"] if bp else []
+    if not live:
+        return None
+    px = pixel_palette([path_of(state.session_id, a.design_id) for a in live])
+    seen = bp.design_hints.colors or {}
+    c = {k: seen.get(k) or px.get(k) for k in ("primary", "ink", "surface", "accent")}
+    if not c["primary"]:
+        return None
+    from .brand import contrast, _mix
+    c["ink"] = c["ink"] or "#15151B"
+    c["surface"] = c["surface"] or _mix("#FFFFFF", c["primary"], 0.06)
+    if contrast(c["ink"], c["surface"]) < 4.5:
+        c["ink"] = "#15151B"
+    c["accent"] = c["accent"] or _mix(c["primary"], "#000000", 0.25)
+    return Palette(name="From your designs", mood="Read from your uploads",
+                   rationale=f"Taken from {len(live)} uploaded screen{'s' if len(live) != 1 else ''}: the brand colour, text, background and accent they use.",
+                   **c)
+
+
+def offer_palette(state, apply: bool = True) -> None:
+    """Put the designs' palette first among the options and make it the
+    default -- unless Colours is frozen or the owner tuned a palette by hand."""
+    p = design_palette(state)
+    b = state.brand
+    b.palette_options = [x for x in b.palette_options if x.name != "From your designs"]
+    if not p:
+        return
+    b.palette_options.insert(0, p)
+    if not apply:
+        return
+    from . import brand
+    try:
+        brand.check_edit(state, "colours")
+    except ValueError:
+        return
+    if not b.palette or not b.palette.name.endswith("(edited)"):
+        b.palette = p
+        state.selected_theme = p.name
+
+
+# ------------------------------------------------------------------ managing the uploaded files (2026-10-13)
+def files_view(state) -> list[dict]:
+    """Every uploaded file with its screens; designs uploaded before files
+    were kept appear grouped by their original name."""
+    bp = state.brand.blueprint
+    if not bp:
+        return []
+    out = []
+    for f in bp.design_files:
+        ids = [a.design_id for a in bp.designs if a.file_id == f.file_id]
+        out.append({**f.model_dump(), "screens": len(ids), "design_ids": ids, "kept": True})
+    legacy = {}
+    for a in bp.designs:
+        if not a.file_id:
+            legacy.setdefault(a.original or "earlier upload", []).append(a.design_id)
+    for name, ids in legacy.items():
+        out.append({"file_id": "legacy-" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40], "name": name, "size": 0, "ext": "",
+                    "uploaded_at": "", "screens": len(ids), "design_ids": ids, "kept": False})
+    return out
+
+
+def _file_ids(state, file_id: str) -> list[str]:
+    for f in files_view(state):
+        if f["file_id"] == file_id:
+            return f["design_ids"]
+    raise KeyError("file not found")
+
+
+def remove_file(state, file_id: str) -> int:
+    """Remove an uploaded file and every screen taken from it. Screens already
+    added to a UI/UX module stay there (they are copies)."""
+    bp = state.brand.blueprint
+    ids = set(_file_ids(state, file_id))
+    for did in ids:
+        try:
+            path_of(state.session_id, did).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+    bp.designs = [a for a in bp.designs if a.design_id not in ids]
+    keep = []
+    for f in bp.design_files:
+        if f.file_id == file_id:
+            try:
+                source_path(state.session_id, f).unlink(missing_ok=True)
+            except OSError:
+                pass
+        else:
+            keep.append(f)
+    bp.design_files = keep
+    place(bp)
+    if not bp.designs:
+        bp.design_hints = DesignHints(generate_ok=bp.design_hints.generate_ok)
+    offer_palette(state)
+    return len(ids)
+
+
+async def reread_file(session_id: str, file_id: str) -> None:
+    state = await store.get_session(session_id)
+    ids = _file_ids(state, file_id)
+    for a in state.brand.blueprint.designs:
+        if a.design_id in ids and a.confidence >= 0:
+            a.status = "unsure"
+    state.design_import = GenerationProgress(
+        status="running", total=len(ids), done=0, started_at=_now(), updated_at=_now(),
+        items=[GenerationItem(module=file_id, req_id=d) for d in ids])
+    await store.save_session(state)
+    t = asyncio.create_task(_read_all(session_id, ids))
+    _tasks.add(t)
+    t.add_done_callback(_tasks.discard)

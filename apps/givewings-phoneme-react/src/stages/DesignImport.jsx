@@ -4,7 +4,7 @@
 // the frame. The owner only checks the sort; empty places are generated in the
 // style read off the designs.
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, CircleHelp, EyeOff, ImageUp, Palette, Sparkles, Wand2 } from "lucide-react";
+import { CheckCircle2, CircleHelp, Download, EyeOff, FolderOpen, ImageUp, Palette, RefreshCw, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { api, fileUrl } from "../api.js";
 
 const KIND = {
@@ -12,6 +12,51 @@ const KIND = {
   list: "List / library", detail: "Detail", create: "Create", publish: "Review & publish", settings: "Settings",
   profile: "Profile", share: "Share sheet", other: "Other",
 };
+
+const kb = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+// 2026-10-13: every uploaded file is kept, as uploaded, in the product's own
+// design folder -- listed here with its screens, to download, re-read or remove.
+function DesignFiles({ sid, session, setSession, frozen, busy, setBusy, setError, onAdd }) {
+  const [view, setView] = useState(null);
+  const [confirm, setConfirm] = useState("");
+  const bp = session.brand?.blueprint;
+  const sig = JSON.stringify([(bp?.design_files || []).length, (bp?.designs || []).length, session.design_import?.status]);
+  useEffect(() => { api.designFiles(sid).then(setView).catch(() => {}); }, [sid, sig]);
+  if (!view) return null;
+  const files = view.files || [];
+  const total = files.reduce((n, f) => n + (f.size || 0), 0);
+  const act = async (label, fn) => {
+    setBusy(label); setError(null);
+    try { setSession(await fn()); } catch (e) { setError(e.message); } finally { setBusy(""); setConfirm(""); }
+  };
+  return (
+    <div className="df">
+      <div className="df-head">
+        <FolderOpen size={18} aria-hidden="true" />
+        <div><strong>{view.folder}</strong><small>{files.length} file{files.length !== 1 ? "s" : ""} · {files.reduce((n, f) => n + f.screens, 0)} screens{total ? ` · ${kb(total)}` : ""}</small></div>
+        {!frozen && <button type="button" className="btn-secondary sm" disabled={!!busy} onClick={onAdd}><ImageUp size={14} /> Add files</button>}
+      </div>
+      {files.length === 0 ? <p className="muted small">No files yet. Everything you upload is kept here as uploaded, and goes into the SDLC pack under UI-UX / designs / Source.</p> : (
+        <ul className="df-list">
+          {files.map((f) => (
+            <li key={f.file_id}>
+              <span className="df-thumbs">{f.design_ids.slice(0, 3).map((id) => <img key={id} src={fileUrl(`/identity/${sid}/designs/file/${id}`)} alt="" loading="lazy" />)}</span>
+              <span className="df-meta"><b title={f.name}>{f.name}</b><small>{f.screens} screen{f.screens !== 1 ? "s" : ""}{f.size ? ` · ${kb(f.size)}` : ""}{f.uploaded_at ? ` · ${f.uploaded_at.slice(0, 10)}` : ""}{!f.kept ? " · original not kept (uploaded before files were stored)" : ""}</small></span>
+              <span className="df-acts">
+                {f.kept && <a className="icon-btn" href={api.designSourceUrl(sid, f.file_id)} title="Download the original" aria-label={`Download ${f.name}`}><Download size={14} /></a>}
+                {!frozen && <button type="button" className="icon-btn" title="Read again with AI" aria-label={`Read ${f.name} again`} disabled={!!busy} onClick={() => act("Reading again…", () => api.rereadDesignFile(sid, f.file_id))}><RefreshCw size={14} /></button>}
+                {!frozen && (confirm === f.file_id
+                  ? <><button type="button" className="btn-danger sm" disabled={!!busy} onClick={() => act("Removing…", () => api.removeDesignFile(sid, f.file_id))}>Remove {f.screens} screen{f.screens !== 1 ? "s" : ""}</button><button type="button" className="link-btn" onClick={() => setConfirm("")}>Keep</button></>
+                  : <button type="button" className="icon-btn" title="Remove this file and its screens" aria-label={`Remove ${f.name}`} disabled={!!busy} onClick={() => setConfirm(f.file_id)}><Trash2 size={14} /></button>)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function Thumb({ sid, d, size = "md" }) {
   return (
@@ -74,6 +119,7 @@ export default function DesignImport({ session, setSession, frozen }) {
 
   return (
     <section className="di">
+      <DesignFiles sid={sid} session={session} setSession={setSession} frozen={frozen} busy={busy || running} setBusy={setBusy} setError={setError} onAdd={() => input.current?.click()} />
       {dropZone}
       {busy && <p className="muted small">{busy}</p>}
       {error && <div className="error-banner" role="alert">{error}</div>}

@@ -23,7 +23,7 @@ from .. import ai_router, brand, design_import, store
 from ..locks import session_lock
 from ..models import (
     BrandOptionsRequest, ChangeOpenRequest, SectionRequest,
-    DesignConsentRequest,
+    DesignConsentRequest, DesignFileRequest,
     DesignUpdateRequest,
     BlueprintSaveRequest, BlueprintTemplateRequest,
     ChooseRequest, DomainCheck, DomainCheckRequest, LogoChoiceRequest,
@@ -269,6 +269,7 @@ async def generate_palettes(req: SessionRequest):
         if not opts:
             raise HTTPException(502, "the AI did not return usable palettes — try again")
         state.brand.palette_options = opts[:3]
+        design_import.offer_palette(state, apply=False)  # the designs' own palette stays first
         await store.save_session(state)
         return state
 
@@ -441,7 +442,7 @@ async def blueprint_template(req: BlueprintTemplateRequest):
         old = state.brand.blueprint
         if old:  # keep the version history, module placement and the owner's designs
             bp.version, bp.module_slots = old.version, old.module_slots
-            bp.designs, bp.design_hints = old.designs, old.design_hints
+            bp.designs, bp.design_hints, bp.design_files = old.designs, old.design_hints, old.design_files
             design_import.place(bp)
         state.brand.blueprint = bp
         await store.save_session(state)
@@ -458,7 +459,7 @@ async def blueprint_save(req: BlueprintSaveRequest):
         old = state.brand.blueprint
         _guard(state, brand.blueprint_sections(old, bp))
         bp.version, bp.frozen, bp.frozen_at = (old.version if old else ""), False, ""
-        bp.designs, bp.design_hints = (old.designs, old.design_hints) if old else ([], bp.design_hints)  # server-managed
+        bp.designs, bp.design_hints, bp.design_files = (old.designs, old.design_hints, old.design_files) if old else ([], bp.design_hints, [])  # server-managed
         design_import.place(bp)
         state.brand.blueprint = bp
         await store.save_session(state)
@@ -592,15 +593,71 @@ async def designs_use_colours(req: SessionRequest):
     async with session_lock(req.session_id, "blueprint"):
         state = await _get(req.session_id)
         _guard(state, "colours")
-        c = state.brand.blueprint.design_hints.colors if state.brand.blueprint else {}
-        if not c.get("primary"):
-            raise HTTPException(400, "no colours were read from your designs")
-        base = state.brand.palette or Palette()
-        state.brand.palette = Palette(name="From your designs", mood=base.mood, rationale="Taken from the uploaded designs.",
-                                      primary=c["primary"], ink=c.get("ink") or base.ink, surface=c.get("surface") or base.surface,
-                                      accent=c.get("accent") or base.accent)
+        p = design_palette_or_404(state)
+        state.brand.palette = p
+        state.selected_theme = p.name
+        design_import.offer_palette(state)
+        state.brand.palette = p
         await store.save_session(state)
         return state
+
+
+def design_palette_or_404(state):
+    p = design_import.design_palette(state)
+    if not p:
+        raise HTTPException(400, "no colours were read from your designs")
+    return p
+
+
+@router.get("/{session_id}/designs/files")
+async def designs_files(session_id: str):
+    state = await _get(session_id)
+    return {"folder": f"{state.selected_name or 'Product'} / Designs", "files": design_import.files_view(state)}
+
+
+@router.get("/{session_id}/designs/source/{file_id}")
+async def designs_source(session_id: str, file_id: str):
+    from fastapi.responses import FileResponse
+    state = await _get(session_id)
+    bp = state.brand.blueprint
+    f = next((x for x in (bp.design_files if bp else []) if x.file_id == file_id), None)
+    if not f:
+        raise HTTPException(404, "file not found")
+    path = design_import.source_path(session_id, f)
+    if not path.exists():
+        raise HTTPException(404, "file missing")
+    mime = {"zip": "application/zip", "jpg": "image/jpeg", "webp": "image/webp", "gif": "image/gif"}.get(f.ext, "image/png")
+    safe = re.sub(r'[^A-Za-z0-9._ -]+', "_", f.name) or f"design.{f.ext}"
+    return FileResponse(path, media_type=mime, filename=safe, headers={"X-Content-Type-Options": "nosniff"})
+
+
+@router.post("/designs/files/remove", response_model=SessionState)
+async def designs_file_remove(req: DesignFileRequest):
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        _editable(state)
+        if state.design_import.status == "running":
+            raise HTTPException(409, "still reading your last upload — wait a moment")
+        try:
+            design_import.remove_file(state, req.file_id)
+        except KeyError:
+            raise HTTPException(404, "file not found")
+        await store.save_session(state)
+        return state
+
+
+@router.post("/designs/files/reread", response_model=SessionState)
+async def designs_file_reread(req: DesignFileRequest):
+    async with session_lock(req.session_id, "blueprint"):
+        state = await _get(req.session_id)
+        _editable(state)
+        if state.design_import.status == "running":
+            raise HTTPException(409, "still reading your last upload — wait a moment")
+        try:
+            await design_import.reread_file(req.session_id, req.file_id)
+        except KeyError:
+            raise HTTPException(404, "file not found")
+        return await _get(req.session_id)
 
 
 @router.post("/complete", response_model=SessionState)
